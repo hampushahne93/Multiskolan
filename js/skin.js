@@ -485,12 +485,61 @@ function printMotif(ctx, kind, x, y, col) {
   }
 }
 
+// Detaljfärg: andra färgen om den syns mot huvudfärgen, annars en mörkare/ljusare variant
+function accentOf(c1, c2) {
+  if (c2 && Math.abs(lum(c2) - lum(c1)) > 0.18) return c2;
+  return lum(c1) > 0.55 ? shade(c1, -0.5) : shade(c1, 0.6);
+}
+// Resårkant med ränder (muddar, linningar)
+function rib(ctx, x, y, w, h, col, vertical = true) {
+  ctx.fillStyle = col; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = shade(col, -0.18);
+  if (vertical) for (let i = x + 3; i < x + w; i += 8) ctx.fillRect(i, y, 3, h);
+  else for (let j = y + 3; j < y + h; j += 8) ctx.fillRect(x, j, w, 3);
+}
+function stitch(ctx, pts, col, w = 2.5) {
+  ctx.save(); ctx.setLineDash([7, 5]); line(ctx, pts, col, w); ctx.restore();
+}
+// Romber (argyle) – klassiskt västmönster
+function argyle(ctx, c1, acc) {
+  const W = 54, H = 80, dark = shade(c1, -0.22), light = shade(c1, 0.18);
+  for (let row = -1; row < 8; row++) for (let col = -1; col < 8; col++) {
+    const x = TORSO[0] + col * W + (row % 2 ? W / 2 : 0), y = TORSO[1] + row * H / 2;
+    poly(ctx, [[x, y - H / 2], [x + W / 2, y], [x, y + H / 2], [x - W / 2, y]], (row + col) % 2 ? dark : light);
+  }
+  ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = acc; ctx.lineWidth = 3;
+  for (let k = -10; k < 14; k++) {
+    ctx.beginPath(); ctx.moveTo(TORSO[0] + k * W, TORSO[1]); ctx.lineTo(TORSO[0] + k * W + 534 * W / H, TORSO[1] + 534); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(TORSO[0] + k * W, TORSO[1]); ctx.lineTo(TORSO[0] + k * W - 534 * W / H, TORSO[1] + 534); ctx.stroke();
+  }
+  ctx.restore();
+}
+// Flätstickning (kofta): repflätor i kolumner
+function cableKnit(ctx, x0, x1, y0, y1, c) {
+  const d = shade(c, -0.2), l = shade(c, 0.14);
+  for (let x = x0 + 18; x < x1; x += 46) {
+    for (let y = y0; y < y1; y += 26) {
+      ctx.save(); ctx.translate(x, y);
+      ellipse(ctx, -5, 0, 7, 13, d, 0.6); ellipse(ctx, 5, 13, 7, 13, d, -0.6);
+      ellipse(ctx, -5, -1, 4, 9, l, 0.6); ellipse(ctx, 5, 12, 4, 9, l, -0.6);
+      ctx.restore();
+    }
+    ctx.fillStyle = d; ctx.fillRect(x + 20, y0, 3, y1 - y0);
+  }
+}
+
 function paintTop(ctx, look) {
   const top = look.top || 'tshirt';
-  const c1 = look.topColor, c2 = look.topColor2 || contrast(c1);
-  const sleeveCol = top === 'vast' ? c2 : c1;
-  const edge = shade(c1, -0.18);
+  const smoking = top === 'smoking';
+  const c1 = smoking ? '#1f2333' : look.topColor;
+  const c2 = look.topColor2 || '#ffffff';
+  const heroC2 = c2 && c2 !== '#ffffff' && c2 !== look.topColor ? c2 : (look.topColor === '#e23b4e' ? '#2f6db5' : '#e23b4e');
+  const acc = top === 'superhjalte' ? heroC2 : accentOf(c1, c2);
+  const shirt = Math.abs(lum(c2) - lum(c1)) > 0.12 ? c2 : contrast(c1);   // tröjan under (jacka/kofta/väst)
+  const sleeveCol = top === 'vast' ? shirt : top === 'langarm' ? acc : c1;
+  const edge = shade(c1, -0.22);
   const [nx, ny] = NECK;
+  const hasPattern = look.pattern && look.pattern !== 'enfargad' && !smoking;
 
   ctx.save();
   ctx.beginPath();
@@ -498,115 +547,182 @@ function paintTop(ctx, look) {
   ctx.clip();
   ctx.fillStyle = sleeveCol; ctx.fillRect(0, 645, 640, 185);
   ctx.fillStyle = c1; ctx.fillRect(TORSO[0], TORSO[1], TORSO[2], TORSO[3]);
-  if (top === 'vast') { ctx.save(); ctx.beginPath(); ctx.rect(...TORSO); ctx.clip(); }
-  if (look.pattern && look.pattern !== 'enfargad') pattern(ctx, look.pattern, c1, c2);
-  if (top === 'vast') ctx.restore();
-  const cuff = top === 'vast' ? shade(c2, -0.12) : edge;
-  if (['tshirt', 'klanning', 'pike', 'fotboll'].includes(top)) { ctx.fillStyle = cuff; ctx.fillRect(140, 645, 12, 185); ctx.fillRect(493, 645, 12, 185); }
-  if (LONG.includes(top)) { ctx.fillStyle = cuff; ctx.fillRect(0, 645, 46, 185); ctx.fillRect(594, 645, 46, 185); }
-  if (top === 'fotboll') { ctx.fillStyle = c2; ctx.fillRect(158, 645, 16, 185); ctx.fillRect(471, 645, 16, 185); }
-  if (top === 'kofta') { ctx.fillStyle = shade(c1, -0.1); for (let x = 0; x < 46; x += 9) { ctx.fillRect(x, 645, 4, 185); ctx.fillRect(594 + x, 645, 4, 185); } }
-  ctx.fillStyle = edge; ctx.fillRect(160, 1004, 323, 20); ctx.fillRect(160, 490, 323, 14);
+  // Mönster bara på bålen när ärmarna har en egen färg
+  const torsoOnly = ['vast', 'langarm'].includes(top);
+  if (torsoOnly) { ctx.save(); ctx.beginPath(); ctx.rect(...TORSO); ctx.clip(); }
+  if (hasPattern) pattern(ctx, look.pattern, c1, c2);
+  else if (top === 'vast') argyle(ctx, c1, acc);
+  else if (top === 'fotboll') { ctx.fillStyle = acc; for (let x = TORSO[0] + 22; x < TORSO[0] + TORSO[2]; x += 92) ctx.fillRect(x, TORSO[1], 44, TORSO[3]); }
+  else if (top === 'kofta') cableKnit(ctx, TORSO[0], TORSO[0] + TORSO[2], TORSO[1], TORSO[1] + TORSO[3], c1);
+  if (torsoOnly) ctx.restore();
+
+  // Ärmslut och muddar
+  const LEFT = [0, 645], RIGHT = [594, 645];
+  switch (top) {
+    case 'tshirt': case 'klanning':
+      ctx.fillStyle = acc; ctx.fillRect(140, 645, 18, 185); ctx.fillRect(487, 645, 18, 185); break;
+    case 'pike':
+      rib(ctx, 140, 645, 20, 185, acc); rib(ctx, 485, 645, 20, 185, acc); break;
+    case 'fotboll':
+      ctx.fillStyle = acc; ctx.fillRect(140, 645, 22, 185); ctx.fillRect(483, 645, 22, 185);
+      ctx.fillStyle = c1; ctx.fillRect(166, 645, 10, 185); ctx.fillRect(469, 645, 10, 185); break;
+    case 'langarm':
+      rib(ctx, ...LEFT, 46, 185, c1); rib(ctx, ...RIGHT, 46, 185, c1); break;
+    case 'hoodie': case 'jacka': case 'kofta':
+      rib(ctx, ...LEFT, 50, 185, edge); rib(ctx, ...RIGHT, 50, 185, edge); break;
+    case 'vast':
+      ctx.fillStyle = shade(shirt, -0.1); ctx.fillRect(0, 645, 40, 185); ctx.fillRect(600, 645, 40, 185); break;
+    case 'superhjalte':
+      ctx.fillStyle = acc; ctx.fillRect(0, 645, 92, 185); ctx.fillRect(548, 645, 92, 185);
+      ctx.fillStyle = shade(acc, -0.25); ctx.fillRect(88, 645, 8, 185); ctx.fillRect(544, 645, 8, 185); break;
+    case 'regnjacka':
+      ctx.fillStyle = edge; ctx.fillRect(0, 645, 34, 185); ctx.fillRect(606, 645, 34, 185);
+      for (const x of [70, 548]) { ctx.fillStyle = '#e9eef5'; ctx.fillRect(x, 645, 24, 185); ctx.fillStyle = '#b9c3d0'; ctx.fillRect(x, 645, 4, 185); ctx.fillRect(x + 20, 645, 4, 185); }
+      break;
+    case 'smoking':
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 645, 16, 185); ctx.fillRect(624, 645, 16, 185); break;
+  }
+  // Nederkant
+  if (['hoodie', 'jacka', 'kofta', 'vast'].includes(top)) { rib(ctx, 160, 990, 323, 34, edge, true); rib(ctx, 160, 490, 323, 30, edge, true); }
+  else { ctx.fillStyle = edge; ctx.fillRect(160, 1004, 323, 20); ctx.fillRect(160, 490, 323, 14); }
   ctx.restore();
 
-  const roundNeck = () => {
+  const roundNeck = (col = edge, w = 8) => {
     ellipse(ctx, nx, ny + 8, 34, 32, look.skin);
-    ctx.strokeStyle = edge; ctx.lineWidth = 7;
-    ctx.beginPath(); ctx.ellipse(nx, ny + 8, 34, 32, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.ellipse(nx, ny + 8, 34 + w / 2, 32 + w / 2, 0, 0, Math.PI * 2); ctx.stroke();
   };
   const openFront = (inner) => {
     ctx.fillStyle = inner; ctx.fillRect(286, ny, 72, 1024 - ny);
-    ctx.fillStyle = shade(c1, -0.28); ctx.fillRect(282, ny + 20, 6, 1024 - ny); ctx.fillRect(356, ny + 20, 6, 1024 - ny);
+    ctx.fillStyle = shade(c1, -0.3); ctx.fillRect(280, ny + 20, 8, 1024 - ny); ctx.fillRect(356, ny + 20, 8, 1024 - ny);
     ellipse(ctx, nx, ny + 20, 30, 26, look.skin);
   };
-  const buttons = (x, y0, n, gap, col) => { for (let i = 0; i < n; i++) ellipse(ctx, x, y0 + i * gap, 5, 5, col); };
-  const hood = () => {
-    ctx.fillStyle = shade(c1, -0.15);
-    ctx.beginPath(); ctx.ellipse(nx, ny - 30, 70, 62, 0, Math.PI, 0); ctx.lineTo(nx + 40, ny - 10);
+  const buttons = (x, y0, n, gap, col, r = 6) => { for (let i = 0; i < n; i++) { ellipse(ctx, x, y0 + i * gap, r, r, col); ellipse(ctx, x - r * 0.3, y0 + i * gap - r * 0.3, r * 0.35, r * 0.35, shade(col, 0.4)); } };
+  const hood = (col) => {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(nx, ny - 30, 78, 66, 0, Math.PI, 0); ctx.lineTo(nx + 40, ny - 10);
     ctx.ellipse(nx, ny - 10, 40, 30, 0, 0, Math.PI, true); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = shade(col, -0.25); ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.ellipse(nx, ny - 30, 78, 66, 0, Math.PI, 0); ctx.stroke();
   };
 
   switch (top) {
-    case 'jacka':
-      openFront(c2);
-      poly(ctx, [[268, ny], [300, ny + 70], [288, ny + 4]], shade(c1, -0.12));
-      poly(ctx, [[376, ny], [344, ny + 70], [356, ny + 4]], shade(c1, -0.12));
-      roundRect(ctx, 210, 900, 50, 10, 4, shade(c1, -0.25)); roundRect(ctx, 384, 900, 50, 10, 4, shade(c1, -0.25));
+    case 'tshirt':
+      roundNeck(acc, 12);
       break;
+    case 'langarm':
+      roundNeck(acc, 10);
+      break;
+    case 'hoodie': {
+      roundNeck(edge, 8);
+      hood(shade(c1, -0.12));
+      // stor magficka med sömmar
+      poly(ctx, [[236, 978], [262, 884], [382, 884], [408, 978]], shade(c1, -0.16));
+      stitch(ctx, [[244, 972], [268, 892], [376, 892], [400, 972]], shade(c1, 0.3));
+      ctx.strokeStyle = acc; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      for (const x of [nx - 16, nx + 16]) { ctx.beginPath(); ctx.moveTo(x, ny + 34); ctx.lineTo(x + (x < nx ? -4 : 4), ny + 110); ctx.stroke(); roundRect(ctx, x - 5 + (x < nx ? -4 : 4), ny + 106, 10, 16, 3, shade(acc, -0.2)); }
+      break;
+    }
+    case 'jacka': {
+      openFront(shirt);
+      // blixtlås
+      ctx.fillStyle = '#d6dbe4';
+      for (let y = ny + 24; y < 1000; y += 9) { ctx.fillRect(276, y, 6, 4); ctx.fillRect(362, y + 4, 6, 4); }
+      roundRect(ctx, 270, 900, 12, 22, 3, '#c2c8d4');
+      // bröstfickor med dragkedja
+      for (const [x0, x1] of [[200, 262], [382, 444]]) { line(ctx, [[x0, 838], [x1, 826]], '#c9ced9', 6); roundRect(ctx, x1 - 4, 822, 8, 18, 2, '#aeb6c4'); }
+      // nedre fickor
+      roundRect(ctx, 200, 930, 66, 12, 4, shade(c1, -0.3)); roundRect(ctx, 378, 930, 66, 12, 4, shade(c1, -0.3));
+      break;
+    }
     case 'kofta':
-      openFront(c2);
-      buttons(278, ny + 50, 5, 46, shade(c1, -0.35));
-      ctx.fillStyle = shade(c1, -0.1); for (let x = 160; x < 483; x += 9) ctx.fillRect(x, 975, 4, 30);
+      openFront(shirt);
+      buttons(274, ny + 46, 5, 46, accentOf(c1, shade(c1, -0.5)), 9);
+      for (const x of [196, 384]) { rib(ctx, x, 912, 66, 14, edge, true); stitch(ctx, [[x, 926], [x, 984], [x + 66, 984], [x + 66, 926]], shade(c1, -0.3)); }
       break;
     case 'smoking': {
-      poly(ctx, [[nx - 34, ny], [nx + 34, ny], [nx + 14, 990], [nx - 14, 990]], c2 === c1 ? '#ffffff' : c2);
-      poly(ctx, [[nx - 34, ny], [nx - 10, 900], [nx - 56, ny + 40]], shade(c1, 0.12));
-      poly(ctx, [[nx + 34, ny], [nx + 10, 900], [nx + 56, ny + 40]], shade(c1, 0.12));
+      // vit skjorta med veck, sidenslag, fluga och näsduk i vald färg
+      const bow = look.topColor;
+      poly(ctx, [[nx - 36, ny], [nx + 36, ny], [nx + 18, 1004], [nx - 18, 1004]], '#ffffff');
+      for (const dx of [-10, 0, 10]) line(ctx, [[nx + dx, ny + 60], [nx + dx * 0.6, 990]], '#e3e6ee', 2);
+      poly(ctx, [[nx - 36, ny], [nx - 12, 920], [nx - 62, ny + 46]], '#363c54');
+      poly(ctx, [[nx + 36, ny], [nx + 12, 920], [nx + 62, ny + 46]], '#363c54');
+      line(ctx, [[nx - 36, ny], [nx - 12, 920]], '#4a5170', 3); line(ctx, [[nx + 36, ny], [nx + 12, 920]], '#4a5170', 3);
       ellipse(ctx, nx, ny + 12, 26, 22, look.skin);
-      const bow = look.printColor && look.printColor !== '#ffffff' ? look.printColor : '#e23b4e';
-      poly(ctx, [[nx, ny + 38], [nx - 24, ny + 26], [nx - 24, ny + 50]], bow); poly(ctx, [[nx, ny + 38], [nx + 24, ny + 26], [nx + 24, ny + 50]], bow);
-      ellipse(ctx, nx, ny + 38, 6, 6, shade(bow, -0.2));
-      buttons(nx, ny + 80, 3, 40, '#2a2f45');
+      poly(ctx, [[nx, ny + 40], [nx - 30, ny + 24], [nx - 30, ny + 56]], bow); poly(ctx, [[nx, ny + 40], [nx + 30, ny + 24], [nx + 30, ny + 56]], bow);
+      ellipse(ctx, nx, ny + 40, 8, 8, shade(bow, -0.25));
+      buttons(nx, ny + 90, 3, 36, '#1f2333', 5);
+      poly(ctx, [[392, 812], [430, 812], [420, 836], [402, 836]], bow);      // näsduk
+      ctx.fillStyle = shade(c1, 0.12); ctx.fillRect(388, 836, 46, 6);
       break;
     }
     case 'linne':
-      ellipse(ctx, nx, ny + 22, 46, 52, look.skin);
-      ctx.strokeStyle = edge; ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.ellipse(nx, ny + 22, 46, 52, 0, 0, Math.PI); ctx.stroke();
+      ellipse(ctx, nx, ny + 26, 50, 58, look.skin);
+      ctx.strokeStyle = acc; ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.ellipse(nx, ny + 26, 50, 58, 0, 0, Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(nx, ny - 6, 50, 40, 0, Math.PI, 0); ctx.stroke();
       break;
     case 'vast':
-      poly(ctx, [[nx - 40, ny], [nx + 40, ny], [nx, 900]], c2);
-      roundNeck();
-      buttons(nx, 915, 3, 32, shade(c1, -0.35));
+      // V-ringning med skjortkrage
+      poly(ctx, [[nx - 46, ny], [nx + 46, ny], [nx, 905]], shirt);
+      line(ctx, [[nx - 50, ny], [nx, 910], [nx + 50, ny]], edge, 12);
+      poly(ctx, [[nx - 34, ny - 4], [nx - 4, ny + 30], [nx - 28, ny + 46]], shade(shirt, -0.08));
+      poly(ctx, [[nx + 34, ny - 4], [nx + 4, ny + 30], [nx + 28, ny + 46]], shade(shirt, -0.08));
+      ellipse(ctx, nx, ny + 8, 26, 22, look.skin);
       break;
     case 'pike':
-      roundNeck();
-      poly(ctx, [[nx - 36, ny - 4], [nx - 4, ny + 30], [nx - 30, ny + 46]], shade(c1, 0.15));
-      poly(ctx, [[nx + 36, ny - 4], [nx + 4, ny + 30], [nx + 30, ny + 46]], shade(c1, 0.15));
-      roundRect(ctx, nx - 8, ny + 34, 16, 60, 4, shade(c1, -0.1));
-      buttons(nx, ny + 46, 3, 18, '#ffffff');
+      roundNeck(acc, 8);
+      roundRect(ctx, nx - 11, ny + 30, 22, 74, 4, acc);
+      buttons(nx, ny + 46, 3, 20, '#ffffff', 5);
+      // liten logga
+      ellipse(ctx, 392, 826, 14, 8, acc); ellipse(ctx, 404, 822, 5, 4, acc); ellipse(ctx, 406, 821, 1.5, 1.5, '#ffffff');
       break;
     case 'fotboll':
-      poly(ctx, [[nx - 34, ny], [nx + 34, ny], [nx, ny + 46]], look.skin);
-      line(ctx, [[nx - 36, ny], [nx, ny + 48], [nx + 36, ny]], c2, 7);
-      ctx.fillStyle = c2; ctx.font = 'bold 120px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.save(); ctx.translate(nx, 610); ctx.rotate(Math.PI); ctx.fillText('10', 0, 0); ctx.restore();
+      poly(ctx, [[nx - 38, ny], [nx + 38, ny], [nx, ny + 52]], look.skin);
+      line(ctx, [[nx - 40, ny], [nx, ny + 54], [nx + 40, ny]], acc, 9);
+      // stort nummer på ryggen, mindre på bröstet
+      ctx.font = 'bold 150px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.save(); ctx.translate(nx, 600); ctx.rotate(Math.PI);
+      ctx.lineWidth = 12; ctx.strokeStyle = shade(acc, -0.3); ctx.strokeText('10', 0, 0); ctx.fillStyle = '#ffffff'; ctx.fillText('10', 0, 0); ctx.restore();
       break;
     case 'regnjacka':
-      roundNeck();
-      buttons(nx, ny + 60, 5, 46, shade(c1, -0.35));
-      roundRect(ctx, 210, 930, 54, 40, 6, shade(c1, -0.1)); roundRect(ctx, 380, 930, 54, 40, 6, shade(c1, -0.1));
-      hood();
+      roundNeck(edge, 10);
+      hood(shade(c1, -0.1));
+      // reflexband runt bröstet
+      for (const y of [905, 565]) { ctx.fillStyle = '#e9eef5'; ctx.fillRect(160, y, 323, 28); ctx.fillStyle = '#b9c3d0'; ctx.fillRect(160, y, 323, 4); ctx.fillRect(160, y + 24, 323, 4); }
+      // knebelknappar
+      for (let i = 0; i < 4; i++) { roundRect(ctx, nx - 18, ny + 54 + i * 54, 36, 12, 6, '#8a5a32'); line(ctx, [[nx - 24, ny + 60 + i * 54], [nx + 24, ny + 60 + i * 54]], shade(c1, -0.35), 3); }
+      // fickor med lock
+      for (const x of [196, 380]) { roundRect(ctx, x, 945, 68, 50, 6, shade(c1, -0.12)); roundRect(ctx, x - 3, 940, 74, 18, 6, shade(c1, -0.3)); }
       break;
     case 'superhjalte':
-      roundNeck();
-      ctx.fillStyle = c2; ctx.fillRect(160, 990, 323, 18);
+      roundNeck(acc, 10);
+      // bälte med spänne
+      ctx.fillStyle = '#ffd84a'; ctx.fillRect(160, 978, 323, 26); ctx.fillRect(160, 504, 323, 26);
+      roundRect(ctx, nx - 26, 972, 52, 38, 8, '#ffb000'); roundRect(ctx, nx - 15, 981, 30, 20, 4, '#ffd84a');
+      break;
+    case 'klanning':
+      roundNeck(acc, 10);
+      // skärp med rosett på ryggen
+      ctx.fillStyle = acc; ctx.fillRect(160, 935, 323, 30); ctx.fillRect(160, 548, 323, 30);
+      poly(ctx, [[nx, 563], [nx - 46, 538], [nx - 46, 588]], shade(acc, -0.1)); poly(ctx, [[nx, 563], [nx + 46, 538], [nx + 46, 588]], shade(acc, -0.1));
+      ellipse(ctx, nx, 563, 12, 12, shade(acc, -0.25));
       break;
     default:
       roundNeck();
   }
-  if (top === 'hoodie') {
-    hood();
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-    for (const x of [nx - 14, nx + 14]) { ctx.beginPath(); ctx.moveTo(x, ny + 36); ctx.lineTo(x, ny + 90); ctx.stroke(); ellipse(ctx, x, ny + 92, 5, 5, '#ffffff'); }
-    poly(ctx, [[250, 965], [270, 905], [374, 905], [394, 965]], shade(c1, -0.12));
-  }
-  if (top === 'klanning') {
-    ctx.fillStyle = shade(c1, -0.15); ctx.fillRect(160, 940, 323, 14);
-    if (look.print === 'ingen' || !look.print) for (const y of [960, 985]) ellipse(ctx, nx, y, 5, 5, '#ffffff');
-  }
   const pc = look.printColor || (c2 === c1 ? contrast(c1) : c2);
   const noPrint = !look.print || look.print === 'ingen';
   if (top === 'superhjalte') {
-    poly(ctx, [[nx, 815], [nx + 52, 860], [nx, 918], [nx - 52, 860]], '#ffd84a');
-    poly(ctx, [[nx, 825], [nx + 42, 860], [nx, 908], [nx - 42, 860]], c2);
-    if (noPrint) printMotif(ctx, 'blixt', nx, 862, '#ffd84a');
+    poly(ctx, [[nx, 800], [nx + 66, 856], [nx, 928], [nx - 66, 856]], '#ffd84a');
+    poly(ctx, [[nx, 812], [nx + 54, 856], [nx, 916], [nx - 54, 856]], acc);
+    if (noPrint) printMotif(ctx, 'blixt', nx, 860, '#ffd84a');
   }
   if (top === 'fotboll' && noPrint) {
-    ctx.fillStyle = c2; ctx.font = 'bold 54px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('10', nx + 70, 840);
+    ctx.font = 'bold 80px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = shade(acc, -0.3); ctx.strokeText('10', nx, 860); ctx.fillStyle = '#ffffff'; ctx.fillText('10', nx, 860);
   }
-  if (!noPrint && top !== 'smoking') printMotif(ctx, look.print, nx, ['jacka', 'kofta'].includes(top) ? 870 : 862, pc);
+  if (!noPrint && !smoking) printMotif(ctx, look.print, nx, ['jacka', 'kofta'].includes(top) ? 870 : 862, pc);
 }
 
 /* =========================================================
@@ -615,6 +731,16 @@ function paintTop(ctx, look) {
 const SKIRTS = ['kjol', 'tutu', 'veckkjol'];
 export const isSkirt = look => look.top === 'klanning' || SKIRTS.includes(look.bottom);
 
+// Byxtyget: framstycke x 611–818 (båda benen), bakstycke x 826–1024; midja y 764, fotled y 1024
+const LEG_FRONT = [662, 766], LEG_BACK = [876, 975];
+function denim(ctx, x, y, w, h, col) {
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.globalAlpha = 0.18; ctx.strokeStyle = shade(col, 0.5); ctx.lineWidth = 1.5;
+  for (let k = -h; k < w; k += 6) { ctx.beginPath(); ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); ctx.stroke(); }
+  ctx.globalAlpha = 0.12; ctx.strokeStyle = shade(col, -0.5);
+  for (let k = -h + 3; k < w; k += 6) { ctx.beginPath(); ctx.moveTo(x + k, y + h); ctx.lineTo(x + k + h, y); ctx.stroke(); }
+  ctx.globalAlpha = 1; ctx.restore();
+}
 function paintBottom(ctx, look) {
   const dress = look.top === 'klanning';
   const style = dress ? 'klanning' : (look.bottom || 'byxor');
@@ -625,43 +751,77 @@ function paintBottom(ctx, look) {
   }
   const shorts = style === 'shorts' || style === 'jeansshorts';
   const h = shorts ? 130 : 260;
+  const dark = shade(col, -0.22), light = shade(col, 0.22);
   ctx.fillStyle = col; ctx.fillRect(611, 764, 413, h);
+  const denimLook = style === 'jeans' || style === 'jeansshorts';
+  if (denimLook) {
+    denim(ctx, 611, 764, 413, h, col);
+    // ljusare slitage på låren och "morrhår" vid grenen
+    for (const x of LEG_FRONT) {
+      const g = ctx.createRadialGradient(x, 850, 4, x, 850, 70);
+      g.addColorStop(0, shade(col, 0.42) + 'cc'); g.addColorStop(1, shade(col, 0.42) + '00');
+      ctx.fillStyle = g; ctx.fillRect(x - 70, 780, 140, 150);
+    }
+    for (const x of [714]) for (let i = 0; i < 3; i++) { line(ctx, [[x - 8 - i * 9, 800 + i * 6], [x - 40 - i * 12, 812 + i * 10]], shade(col, 0.35), 3); line(ctx, [[x + 8 + i * 9, 800 + i * 6], [x + 40 + i * 12, 812 + i * 10]], shade(col, 0.35), 3); }
+  }
   if (style === 'rutiga') {
     ctx.save(); ctx.beginPath(); ctx.rect(611, 764, 413, h); ctx.clip();
-    ctx.globalAlpha = 0.35; ctx.fillStyle = shade(col, -0.45);
-    for (let y = 764; y < 1024; y += 40) ctx.fillRect(611, y, 413, 14);
-    for (let x = 611; x < 1024; x += 40) ctx.fillRect(x, 764, 14, 260);
-    ctx.globalAlpha = 0.6; ctx.fillStyle = '#ffffff';
-    for (let y = 784; y < 1024; y += 40) ctx.fillRect(611, y, 413, 3);
+    ctx.globalAlpha = 0.5; ctx.fillStyle = shade(col, -0.5);
+    for (let y = 764; y < 1024; y += 44) ctx.fillRect(611, y, 413, 18);
+    for (let x = 611; x < 1024; x += 44) ctx.fillRect(x, 764, 18, 260);
+    ctx.globalAlpha = 0.85; ctx.fillStyle = lum(col) > 0.6 ? '#e23b4e' : '#ffd84a';
+    for (let y = 790; y < 1024; y += 44) ctx.fillRect(611, y, 413, 3);
+    for (let x = 637; x < 1024; x += 44) ctx.fillRect(x, 764, 3, 260);
     ctx.globalAlpha = 1; ctx.restore();
   }
-  const dark = shade(col, -0.2);
-  if (style !== 'leggings') { ctx.fillStyle = dark; ctx.fillRect(611, 764, 413, 20); }
+  if (style === 'kostym') {
+    // kritstreck och pressveck
+    ctx.fillStyle = shade(col, 0.4); ctx.globalAlpha = 0.55;
+    for (let x = 618; x < 1024; x += 16) ctx.fillRect(x, 790, 2, 234);
+    ctx.globalAlpha = 1;
+    for (const x of [...LEG_FRONT, ...LEG_BACK]) { ctx.fillStyle = shade(col, 0.18); ctx.fillRect(x - 2, 800, 4, 224); }
+  }
+  // linning och fåll
+  if (style !== 'leggings') { ctx.fillStyle = dark; ctx.fillRect(611, 764, 413, 22); }
   if (shorts) { ctx.fillStyle = dark; ctx.fillRect(611, 764 + h - 12, 413, 12); }
-  else if (style === 'mjukis') { ctx.fillStyle = dark; ctx.fillRect(611, 985, 413, 39); }
-  else if (style !== 'leggings') { ctx.fillStyle = dark; ctx.fillRect(611, 995, 413, 29); }
+  else if (style === 'byxor') { ctx.fillStyle = shade(col, 0.16); ctx.fillRect(611, 996, 413, 28); ctx.fillStyle = dark; ctx.fillRect(611, 996, 413, 3); }
+  else if (style === 'cargo' || style === 'kostym' || denimLook) { ctx.fillStyle = dark; ctx.fillRect(611, 1004, 413, 20); }
   if (style === 'jeansshorts') {
     ctx.fillStyle = '#e8eef8';
     for (let x = 611; x < 1024; x += 8) ctx.fillRect(x, 764 + h - 4, 4, 8 + ((x * 7) % 9));
   }
-  if (style === 'jeans' || style === 'jeansshorts') {
-    ctx.strokeStyle = '#f2b45a'; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]);
-    for (const x of [640, 700, 760, 860, 920, 980]) { ctx.beginPath(); ctx.moveTo(x, 790); ctx.lineTo(x, 764 + h - 14); ctx.stroke(); }
-    ctx.beginPath(); ctx.moveTo(611, 788); ctx.lineTo(1024, 788); ctx.stroke();
+  if (denimLook) {
+    ctx.strokeStyle = '#f2a33a'; ctx.lineWidth = 3; ctx.setLineDash([7, 5]);
+    for (const x of [622, 806, 838, 1012]) { ctx.beginPath(); ctx.moveTo(x, 790); ctx.lineTo(x, 764 + h - 14); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(611, 790); ctx.lineTo(1024, 790); ctx.stroke();
+    // bakfickor
+    for (const x of LEG_BACK) { ctx.beginPath(); ctx.moveTo(x - 34, 806); ctx.lineTo(x + 34, 806); ctx.lineTo(x + 30, 856); ctx.lineTo(x, 868); ctx.lineTo(x - 30, 856); ctx.closePath(); ctx.stroke(); }
     ctx.setLineDash([]);
-  }
-  if (['byxor', 'jeans', 'kostym'].includes(style)) for (const x of [660, 760, 870, 975]) ellipse(ctx, x, 890, 10, 4, shade(col, -0.1));
-  if (style === 'kostym') { ctx.fillStyle = shade(col, -0.12); for (const x of [670, 780, 880, 965]) ctx.fillRect(x, 800, 3, 195); }
-  if (style === 'mjukis' || style === 'leggings') {
-    ctx.fillStyle = style === 'mjukis' ? '#ffffff' : shade(col, 0.25);
-    for (const x of [635, 808, 826, 999]) ctx.fillRect(x, 790, 10, style === 'mjukis' ? 195 : 234);
+    for (const x of [650, 778]) ellipse(ctx, x, 800, 4, 4, '#d9b46a');
   }
   if (style === 'cargo') {
-    for (const x of [640, 768, 830, 958]) {
-      roundRect(ctx, x, 850, 44, 52, 6, shade(col, -0.12));
-      roundRect(ctx, x - 2, 846, 48, 16, 4, shade(col, -0.22));
-      ellipse(ctx, x + 22, 855, 3.5, 3.5, '#d8d8e8');
+    for (const x of [622, 772, 838, 984]) {
+      roundRect(ctx, x, 845, 58, 72, 6, shade(col, -0.18));
+      roundRect(ctx, x - 3, 840, 64, 22, 5, shade(col, -0.32));
+      ellipse(ctx, x + 29, 851, 4.5, 4.5, '#d8d8e8');
+      stitch(ctx, [[x + 4, 866], [x + 4, 912], [x + 54, 912], [x + 54, 866]], shade(col, 0.3), 2);
     }
+    for (const x of LEG_FRONT) roundRect(ctx, x - 30, 930, 60, 50, 10, shade(col, -0.1));
+  }
+  if (style === 'mjukis') {
+    // tre ränder längs sidan, mudd vid fotleden och snöre i midjan
+    for (const x0 of [622, 788, 838, 1004]) for (let i = 0; i < 3; i++) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x0 + i * 10 - 10, 788, 6, 196); }
+    rib(ctx, 611, 984, 413, 40, dark, true);
+    line(ctx, [[704, 786], [698, 836]], '#ffffff', 5); line(ctx, [[724, 786], [730, 836]], '#ffffff', 5);
+  }
+  if (style === 'leggings') {
+    // 3/4-längd: bara fotleder, bred linning i kontrast och en glansrand
+    ctx.fillStyle = look.skin; ctx.fillRect(611, 968, 413, 56);
+    ctx.fillStyle = shade(col, -0.25); ctx.fillRect(611, 960, 413, 10);
+    ctx.fillStyle = accentOf(col, contrast(col)); ctx.fillRect(611, 764, 413, 34);
+    ctx.globalAlpha = 0.35; ctx.fillStyle = '#ffffff';
+    for (const x of LEG_FRONT) ctx.fillRect(x - 8, 805, 10, 150);
+    ctx.globalAlpha = 1;
   }
 }
 

@@ -46,7 +46,9 @@ function measure(model) {
     chest: ['Chest', 'UpperChest'],
     legs: ['LeftUpLeg', 'RightUpLeg'],
     lfoot: ['LeftFoot', 'LeftToes', 'LeftToes_end'],
-    rfoot: ['RightFoot', 'RightToes', 'RightToes_end']
+    rfoot: ['RightFoot', 'RightToes', 'RightToes_end'],
+    lshin: ['LeftLeg'], rshin: ['RightLeg'],
+    neck: ['Neck']
   };
   const out = {};
   for (const k in groups) out[k] = new THREE.Box3();
@@ -64,6 +66,22 @@ function measure(model) {
 }
 
 /* ---------- Hjälp för 3D-tillbehör ---------- */
+const lumOf = c => { const n = parseInt(String(c).replace('#', ''), 16) || 0; return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
+// Rutigt tyg (skotskt) till veckkjolen
+function tartan(col) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = col; g.fillRect(0, 0, 128, 128);
+  g.globalAlpha = 0.45; g.fillStyle = shade(col, -0.55);
+  g.fillRect(0, 20, 128, 34); g.fillRect(20, 0, 34, 128);
+  g.globalAlpha = 0.35; g.fillRect(0, 84, 128, 10); g.fillRect(84, 0, 10, 128);
+  g.globalAlpha = 0.8; g.fillStyle = lumOf(col) > 0.6 ? '#e23b4e' : '#ffffff';
+  g.fillRect(0, 70, 128, 3); g.fillRect(70, 0, 3, 128);
+  g.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 2);
+  return t;
+}
 const mat = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, ...extra });
 function mesh(geo, m, x = 0, y = 0, z = 0) {
   const o = new THREE.Mesh(geo, m);
@@ -99,7 +117,7 @@ function tube(pts, r0, r1, m) {
 const sph = (r, w = 14, h = 10) => new THREE.SphereGeometry(r, w, h);
 function buildExtras(lookIn, parts) {
   const look = resolveLook(lookIn);
-  const G = { head: new THREE.Group(), hips: new THREE.Group(), chest: new THREE.Group(), lfoot: new THREE.Group(), rfoot: new THREE.Group() };
+  const G = { head: new THREE.Group(), hips: new THREE.Group(), chest: new THREE.Group(), lfoot: new THREE.Group(), rfoot: new THREE.Group(), lshin: new THREE.Group(), rshin: new THREE.Group() };
   const head = G.head;
   const hb = parts.head, c = hb.getCenter(new THREE.Vector3()), s = hb.getSize(new THREE.Vector3());
   const top = hb.max.y, back = hb.min.z, front = hb.max.z, W = s.x, H = s.y, D = s.z;
@@ -395,8 +413,9 @@ function buildExtras(lookIn, parts) {
       addSkirt(lsz.y * 0.55, lsz.x * 0.8, mat(shade(col, 0.35), { roughness: 0.6, side: THREE.DoubleSide, transparent: true, opacity: 0.85 }), 40, 0.16);
     } else {
       const len = lsz.y * (dress ? 1.3 : skirtType === 'veckkjol' ? 0.95 : 1.0);
-      const r1 = lsz.x * (dress ? 0.72 : skirtType === 'veckkjol' ? 0.68 : 0.64);
-      addSkirt(len, r1, mat(col, { roughness: 0.85, side: THREE.DoubleSide }), skirtType === 'veckkjol' ? 32 : 28, skirtType === 'veckkjol' ? 0.08 : 0);
+      const r1 = lsz.x * (dress ? 0.72 : skirtType === 'veckkjol' ? 0.7 : 0.64);
+      const pleated = skirtType === 'veckkjol';
+      addSkirt(len, r1, pleated ? mat('#ffffff', { roughness: 0.85, side: THREE.DoubleSide, map: tartan(col) }) : mat(col, { roughness: 0.85, side: THREE.DoubleSide }), pleated ? 24 : 28, pleated ? 0.16 : 0);
       const hem = mesh(new THREE.TorusGeometry(r1, len * 0.03, 6, 40), mat(shade(col, -0.18)), hcen.x, topY - len, hcen.z);
       hem.rotation.x = Math.PI / 2;
       hem.scale.y = zs;
@@ -409,9 +428,88 @@ function buildExtras(lookIn, parts) {
     const ch = parts.chest, csz = ch.getSize(new THREE.Vector3()), cc = ch.getCenter(new THREE.Vector3());
     const len = (ch.max.y - parts.legs.min.y) * 0.95;
     const g = new THREE.CylinderGeometry(csz.x * 0.42, csz.x * 0.75, len, 20, 4, true, Math.PI * 0.6, Math.PI * 0.8);
-    const cape = mesh(g, mat(look.topColor2 || '#e23b4e', { roughness: 0.7, side: THREE.DoubleSide }), cc.x, ch.max.y - len / 2 - csz.y * 0.05, cc.z + csz.z * 0.05);
+    const capeCol = look.topColor2 && look.topColor2 !== '#ffffff' && look.topColor2 !== look.topColor ? look.topColor2 : (look.topColor === '#e23b4e' ? '#2f6db5' : '#e23b4e');
+    const cape = mesh(g, mat(capeCol, { roughness: 0.7, side: THREE.DoubleSide }), cc.x, ch.max.y - len / 2 - csz.y * 0.05, cc.z + csz.z * 0.05);
     cape.scale.z = 0.9;
     G.chest.add(cape);
+  }
+
+  // Tröjor i 3D: luva, kragar och regnjackans längre nederdel
+  if (!preset) {
+    const ch = parts.chest, csz = ch.getSize(new THREE.Vector3()), cc = ch.getCenter(new THREE.Vector3());
+    // Halsen har inga egna punkter i modellen: den sitter mellan bröstet och huvudet
+    const baseY = ch.max.y, nr = csz.x * 0.2;
+    const nc = new THREE.Vector3(cc.x, baseY + (parts.head.min.y - baseY) * 0.5, cc.z - csz.z * 0.06);
+    const c1 = look.topColor, c2 = look.topColor2 || '#ffffff';
+    const accent = Math.abs(lumOf(c2) - lumOf(c1)) > 0.18 ? c2 : (lumOf(c1) > 0.55 ? shade(c1, -0.5) : shade(c1, 0.6));
+    if (look.top === 'hoodie' || look.top === 'regnjacka') {
+      const rain = look.top === 'regnjacka';
+      const hm2 = mat(shade(c1, -0.1), { roughness: rain ? 0.3 : 0.9, side: THREE.DoubleSide });
+      // luvan ligger nere på ryggen: en kupa + en vals runt nacken
+      const pouch = mesh(new THREE.SphereGeometry(1, 20, 14), hm2, nc.x, baseY - csz.y * 0.3, ch.min.z - csz.z * 0.02);
+      pouch.scale.set(csz.x * (rain ? 0.27 : 0.24), csz.y * (rain ? 0.42 : 0.38), csz.z * 0.16);
+      pouch.rotation.x = 0.25;
+      G.chest.add(pouch);
+      const roll = mesh(new THREE.TorusGeometry(nr * 1.35, nr * 0.32, 10, 28), hm2, nc.x, baseY + nr * 0.05, nc.z - nr * 0.1);
+      roll.rotation.x = Math.PI / 2 + 0.2;
+      G.chest.add(roll);
+      if (rain) {
+        // längre jacka: utsvängd nederdel med öppning fram
+        const hp = parts.hips, lg = parts.legs, hsz = hp.getSize(new THREE.Vector3()), lsz = lg.getSize(new THREE.Vector3()), hc = hp.getCenter(new THREE.Vector3());
+        const topY = hp.min.y + hsz.y * 0.55, len = lsz.y * 1.55;
+        const coat = mesh(new THREE.CylinderGeometry(hsz.x * 0.56, lsz.x * 0.66, len, 28, 2, true, 0.3, Math.PI * 2 - 0.6), mat(c1, { roughness: 0.3, side: THREE.DoubleSide }), hc.x, topY - len / 2, hc.z);
+        coat.scale.z = hsz.z / hsz.x * 1.3;
+        G.hips.add(coat);
+        const band = mesh(new THREE.CylinderGeometry(lsz.x * 0.62, lsz.x * 0.655, len * 0.16, 28, 1, true, 0.3, Math.PI * 2 - 0.6), mat('#e9eef5', { roughness: 0.35, metalness: 0.4, side: THREE.DoubleSide }), hc.x, topY - len * 0.8, hc.z);
+        band.scale.z = coat.scale.z * 1.01;
+        G.hips.add(band);
+      }
+    }
+    if (look.top === 'jacka') {
+      // uppfälld krage med öppning fram
+      const col = mesh(new THREE.CylinderGeometry(nr * 1.35, nr * 1.6, nr * 1.1, 24, 1, true, 0.45, Math.PI * 2 - 0.9), mat(shade(c1, -0.15), { roughness: 0.8, side: THREE.DoubleSide }), nc.x, baseY + nr * 0.35, nc.z);
+      G.chest.add(col);
+    }
+    if (look.top === 'pike') {
+      const cm = mat(accent, { roughness: 0.85, side: THREE.DoubleSide });
+      const ring = mesh(new THREE.CylinderGeometry(nr * 1.3, nr * 1.45, nr * 0.55, 24, 1, true), cm, nc.x, baseY + nr * 0.2, nc.z);
+      G.chest.add(ring);
+      for (const s of [-1, 1]) {
+        const flap = mesh(new THREE.BoxGeometry(nr * 1.0, nr * 0.12, nr * 0.95), cm, nc.x + s * nr * 0.6, baseY - nr * 0.05, nc.z + nr * 1.15);
+        flap.rotation.set(0.75, s * 0.35, s * 0.25);
+        G.chest.add(flap);
+      }
+    }
+  }
+
+  const BOOTS = ['stovlar', 'gummistovlar', 'kangor', 'vinterkangor'];
+  // Stövlar och kängor: skaft i 3D som går utanpå byxbenet
+  if (!preset && BOOTS.includes(look.shoeStyle) && parts.lshin) {
+    const st = look.shoeStyle, c = look.shoes;
+    const frac = { stovlar: 0.72, gummistovlar: 0.74, kangor: 0.34, vinterkangor: 0.5 }[st];
+    const colr = { stovlar: shade(c, -0.1), gummistovlar: c, kangor: shade(c, -0.05), vinterkangor: c }[st];
+    const bm = mat(colr, { roughness: st === 'gummistovlar' ? 0.18 : st === 'stovlar' ? 0.45 : 0.9, side: THREE.DoubleSide });
+    for (const [k, f] of [['lshin', 'lfoot'], ['rshin', 'rfoot']]) {
+      const sb = parts[k], sc = sb.getCenter(new THREE.Vector3()), ss = sb.getSize(new THREE.Vector3()), fb = parts[f];
+      const r = Math.max(ss.x, ss.z) * 0.5;
+      const y0 = fb.max.y - ss.y * 0.12, y1 = sb.min.y + ss.y * frac, h = y1 - y0;
+      const shaft = mesh(new THREE.CylinderGeometry(r * 1.16, r * 1.1, h, 24, 1, true), bm, sc.x, y0 + h / 2, sc.z);
+      G[k].add(shaft);
+      const rimCol = { stovlar: shade(c, -0.35), gummistovlar: shade(c, 0.45), kangor: shade(c, -0.3), vinterkangor: '#ffffff' }[st];
+      const rim = mesh(new THREE.TorusGeometry(r * 1.16, r * (st === 'vinterkangor' ? 0.34 : 0.12), 8, 24), mat(rimCol, { roughness: st === 'vinterkangor' ? 1 : 0.6 }), sc.x, y1, sc.z);
+      rim.rotation.x = Math.PI / 2;
+      G[k].add(rim);
+      if (st === 'stovlar') {
+        const strap = mesh(new THREE.TorusGeometry(r * 1.15, r * 0.07, 6, 24), mat(shade(c, -0.4)), sc.x, y0 + h * 0.62, sc.z);
+        strap.rotation.x = Math.PI / 2; G[k].add(strap);
+        G[k].add(mesh(new THREE.BoxGeometry(r * 0.35, r * 0.3, r * 0.12), mat('#ffcf3a', { metalness: 0.7, roughness: 0.3 }), sc.x + (k === 'lshin' ? 1 : -1) * r * 1.12, y0 + h * 0.62, sc.z));
+      }
+      if (st === 'gummistovlar') G[k].add(mesh(new THREE.BoxGeometry(r * 0.22, h * 0.6, r * 0.1), mat(shade(c, 0.35), { roughness: 0.2 }), sc.x, y0 + h * 0.45, sc.z + r * 1.12));
+      if (st === 'kangor') for (let i = 0; i < 3; i++) {
+        const lace = mesh(new THREE.BoxGeometry(r * 0.7, r * 0.08, r * 0.08), mat('#f2d18a'), sc.x, y0 + h * (0.25 + i * 0.25), sc.z + r * 1.14);
+        G[k].add(lace);
+      }
+    }
   }
 
   // Skodelar
@@ -425,11 +523,7 @@ function buildExtras(lookIn, parts) {
       }
     }
     if (look.shoeStyle === 'tofflor') G[k].add(mesh(sph(fs.x * 0.32, 12, 10), mat(shade(look.shoes, 0.35), { roughness: 1 }), fc.x, fb.min.y + fs.y * 0.6, fb.max.z - fs.z * 0.18));
-    if (look.shoeStyle === 'vinterkangor') {
-      const cuff = mesh(new THREE.TorusGeometry(fs.x * 0.42, fs.x * 0.14, 8, 20), mat('#ffffff', { roughness: 1 }), fc.x, fb.max.y - fs.y * 0.1, fc.z - fs.z * 0.15);
-      cuff.rotation.x = Math.PI / 2;
-      G[k].add(cuff);
-    }
+
   }
   return G;
 }
@@ -553,7 +647,7 @@ async function createCharacter(look, gender) {
 
   // 3D-tillbehör fästs på huvud- och höftbenet
   const ex = buildExtras(look, A.parts);
-  const boneFor = { head: 'Head', hips: 'Hips', chest: bones.UpperChest ? 'UpperChest' : 'Chest', lfoot: 'LeftFoot', rfoot: 'RightFoot' };
+  const boneFor = { head: 'Head', hips: 'Hips', chest: bones.UpperChest ? 'UpperChest' : 'Chest', lfoot: 'LeftFoot', rfoot: 'RightFoot', lshin: 'LeftLeg', rshin: 'RightLeg' };
   for (const k in ex) root.add(ex[k]);
   root.updateMatrixWorld(true);
   const spinners = [];

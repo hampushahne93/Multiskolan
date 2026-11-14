@@ -662,9 +662,15 @@
     } else if (tab === 'ansikte') {
       o.append(h4('Ögonfärg'), swatches(OPT.eyes, 'eyes'), h4('Mun'), styleGrid(OPT.mouth, 'mouth'), h4('Extra'), styleGrid(OPT.extra, 'extra'));
     } else if (tab === 'troja') {
-      o.append(h4('Tröja'), styleGrid(OPT.top, 'top'), h4('Färg'), swatches(OPT.cloth, 'topColor'),
+      o.append(h4('Tröja'), styleGrid(OPT.top, 'top'), h4(L.top === 'smoking' ? 'Färg på flugan och näsduken' : 'Färg'), swatches(OPT.cloth, 'topColor'),
         h4('Mönster'), styleGrid(OPT.pattern, 'pattern'));
-      if ((L.pattern && L.pattern !== 'enfargad') || L.top === 'jacka') o.append(h4(L.top === 'jacka' ? 'Färg på tröjan under / mönstret' : 'Mönsterfärg'), swatches(OPT.cloth, 'topColor2'));
+      // Andra färgen används av alla tröjor (kragar, ärmar, ränder, cape, tröjan under …)
+      const second = {
+        tshirt: 'Färg på krage och ärmkanter', langarm: 'Färg på ärmarna', hoodie: 'Färg på luvsnörena', jacka: 'Färg på tröjan under',
+        linne: 'Färg på kanterna', klanning: 'Färg på skärpet', pike: 'Färg på kragen', vast: 'Färg på skjortan under',
+        fotboll: 'Färg på ränderna', superhjalte: 'Färg på capen', regnjacka: 'Detaljfärg', kofta: 'Färg på tröjan under', smoking: 'Detaljfärg'
+      }[L.top] || 'Detaljfärg';
+      if (L.top !== 'smoking' || (L.pattern && L.pattern !== 'enfargad')) o.append(h4((L.pattern && L.pattern !== 'enfargad') ? second + ' / mönstret' : second), swatches(OPT.cloth, 'topColor2'));
       o.append(h4('Tryck'), styleGrid(OPT.print, 'print'));
       if (L.print && L.print !== 'ingen' && !['regnbage', 'smiley', 'raket'].includes(L.print)) o.append(h4('Tryckfärg'), swatches(OPT.cloth, 'printColor'));
     } else if (tab === 'byxor') {
