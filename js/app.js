@@ -220,6 +220,14 @@
   const chime = () => { tone(784, .12, 'sine', .07); tone(1047, .18, 'sine', .06, .08); };
   const fanfare = () => [523, 659, 784, 1047].forEach((f, i) => tone(f, .22, 'triangle', .08, i * .1));
   const pop = () => tone(660 + Math.random() * 200, .1, 'sine', .06);
+  // Läser upp vad man tryckt på (svensk röst), så att den som inte kan läsa ändå vet vad den valt
+  let svVoice = null;
+  const pickVoice = () => { try { svVoice = speechSynthesis.getVoices().find(v => /^sv/i.test(v.lang)) || null; } catch (e) {} };
+  try { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; } catch (e) {}
+  function speak(t) {
+    if (!data.settings.sound || !t || !window.speechSynthesis) return;
+    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = 'sv-SE'; if (svVoice) u.voice = svVoice; u.rate = 0.95; u.pitch = 1.15; speechSynthesis.speak(u); } catch (e) {}
+  }
 
   const soundBtn = $('sound');
   const paintSound = () => soundBtn.textContent = data.settings.sound ? '🔊' : '🔇';
@@ -545,9 +553,9 @@
       b.className = 'tab' + (t.id === tab ? ' on' : '');
       b.innerHTML = `<span>${t.ic}</span><small>${t.label}</small>`;
       b.onclick = () => {
-        tab = t.id; tone(700, .08, 'sine', .05);
+        tab = t.id; tone(700, .08, 'sine', .05); speak(t.label);
         if (tab !== 'prylar' && gearShown) { gearShown = null; stage && stage.showGear && stage.showGear(null); }
-        renderTabs(); renderOpts(); stage && stage.focus(t.focus);
+        renderTabs(); renderOpts(); $('opts').scrollTop = 0; stage && stage.focus(t.focus);
       };
       $('tabs').appendChild(b);
     });
@@ -624,16 +632,18 @@
   }
   function note(text) { const n = document.createElement('div'); n.className = 'note'; n.textContent = text; return n; }
   function h4(text) { const h = document.createElement('h4'); h.textContent = text; return h; }
-  function styleGrid(list, key) {
+  function styleGrid(list, key, preview = null) {
     const g = document.createElement('div');
     g.className = 'styles';
     list.forEach(o => {
       const b = document.createElement('button');
       const owned = isOwned(key, o);
       b.className = 'style' + (draft.look[key] === o.id ? ' on' : '') + (o.soon ? ' soon ' + o.soon : !owned ? ' locked' : '');
-      b.innerHTML = `<span class="ic">${o.ic}</span>${o.label}` +
+      const pv = preview ? preview(o) : null;
+      b.innerHTML = (pv ? `<span class="pv" style="background:${pv}">${['enfargad', 'randig', 'prickig', 'rutig', 'schack', 'regnbage', 'zebra', 'batik'].includes(o.id) ? '' : o.ic}</span>` : `<span class="ic">${o.ic}</span>`) + `<span class="lb">${o.label}</span>` +
         (o.soon ? '<span class="tag soonTag">Kommer snart</span>' : !owned ? `<span class="tag">🔒 100 🪙</span>` : '');
       b.onclick = () => {
+        speak(o.label);
         if (!owned) return openShop(key, o);
         // festklänningar får sina egna färger när man väljer dem (går att byta efteråt)
         if (o.color && draft.look[key] !== o.id) { draft.look.topColor = o.color; if (o.color2) draft.look.topColor2 = o.color2; }
@@ -643,6 +653,13 @@
     });
     return g;
   }
+  /* Färgnamn som läses upp när man trycker (för den som inte kan läsa än) */
+  const COLOR_NAMES = {
+    '#ff5ccf': 'Rosa', '#3ee8ff': 'Turkos', '#8dff5a': 'Ljusgrön', '#ffd84a': 'Gul', '#ff7a3d': 'Orange', '#8a5cff': 'Lila',
+    '#e23b4e': 'Röd', '#2f6db5': 'Blå', '#ffffff': 'Vit', '#2a2f45': 'Svart',
+    '#1b1310': 'Svart', '#3b2316': 'Mörkbrun', '#6a4026': 'Brun', '#a8733f': 'Ljusbrun', '#e3c27a': 'Blond', '#b3471f': 'Röd',
+    '#5b3a1e': 'Bruna', '#8a5a2b': 'Ljusbruna', '#3f8a4a': 'Gröna', '#7a8a99': 'Grå'
+  };
   function swatches(list, key) {
     const g = document.createElement('div');
     g.className = 'swatches';
@@ -650,82 +667,140 @@
       const b = document.createElement('button');
       b.className = 'sw' + (draft.look[key] === c ? ' on' : '');
       b.style.background = c;
-      b.setAttribute('aria-label', c);
-      b.onclick = () => { setLook(key, c); };
+      b.style.setProperty('--ck', lumHex(c) > 0.6 ? '#2a1f6b' : '#fff');
+      b.setAttribute('aria-label', COLOR_NAMES[c] || c);
+      b.onclick = () => { speak(key === 'eyes' && COLOR_NAMES[c] ? COLOR_NAMES[c] + ' ögon' : COLOR_NAMES[c]); setLook(key, c); };
       g.appendChild(b);
     });
     return g;
   }
+  const lumHex = c => { const n = parseInt(c.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
+  /* Mönsterknapparna visar hur mönstret ser ut i tröjans färger */
+  function patternBg(id, c1, c2) {
+    if (c2 === c1) c2 = lumHex(c1) > 0.6 ? '#2a1f6b' : '#ffffff';
+    switch (id) {
+      case 'enfargad': return c1;
+      case 'randig': return `repeating-linear-gradient(0deg, ${c1} 0 9px, ${c2} 9px 16px)`;
+      case 'prickig': return `radial-gradient(${c2} 30%, transparent 33%) 0 0/16px 16px, ${c1}`;
+      case 'rutig': return `linear-gradient(90deg, ${c2}99 50%, transparent 0) 0 0/18px 18px, linear-gradient(${c2}99 50%, transparent 0) 0 0/18px 18px, ${c1}`;
+      case 'schack': return `conic-gradient(${c2} 25%, ${c1} 0 50%, ${c2} 0 75%, ${c1} 0) 0 0/18px 18px`;
+      case 'regnbage': return 'linear-gradient(#ff4d4d, #ffa64d, #ffe14d, #6be36b, #4db8ff, #a64dff)';
+      case 'zebra': return 'repeating-linear-gradient(65deg, #ffffff 0 7px, #222 7px 12px)';
+      case 'batik': return `radial-gradient(circle at 30% 40%, ${c2} 0 18%, transparent 20%), radial-gradient(circle at 75% 70%, ${c2} 0 14%, transparent 16%), ${c1}`;
+      default: return c1;
+    }
+  }
+  /* ---------- Delar i varje flik ("vad vill du ändra?") ---------- */
+  const SECOND_SHORT = {
+    tshirt: 'Kanter', langarm: 'Ärmar', hoodie: 'Snören', jacka: 'Under', linne: 'Kanter', klanning: 'Skärp', pike: 'Krage', vast: 'Skjorta',
+    fotboll: 'Ränder', superhjalte: 'Cape', regnjacka: 'Detaljer', kofta: 'Under', smoking: 'Detaljer',
+    brollop: 'Bandet', brudslap: 'Glittret', balklanning: 'Snörning', rosbal: 'Rosorna', tyll: 'Tyllen', glitter: 'Halsband'
+  };
+  const SECOND_LONG = {
+    tshirt: 'Färg på krage och ärmkanter', langarm: 'Färg på ärmarna', hoodie: 'Färg på luvsnörena', jacka: 'Färg på tröjan under',
+    linne: 'Färg på kanterna', klanning: 'Färg på skärpet', pike: 'Färg på kragen', vast: 'Färg på skjortan under',
+    fotboll: 'Färg på ränderna', superhjalte: 'Färg på capen', regnjacka: 'Detaljfärg', kofta: 'Färg på tröjan under', smoking: 'Färg på flugan och näsduken',
+    brollop: 'Färg på bandet i midjan', brudslap: 'Färg på glittret i midjan', balklanning: 'Färg på snörningen och volangkanterna',
+    rosbal: 'Färg på rosorna', tyll: 'Färg på mittenlagret av tyll', glitter: 'Färg på halsbandet'
+  };
+  function sectionsFor(t) {
+    const L = draft.look, S = [];
+    const add = (id, ic, label, title, render, color = null) => S.push({ id, ic, label, title, render, color });
+    if (t === 'kropp') {
+      add('kon', '👧', 'Tjej / kille', 'Tjej eller kille?', o => {
+        const g = styleGrid([{ id: 'tjej', label: 'Tjej', ic: '👧' }, { id: 'kille', label: 'Kille', ic: '👦' }], '__gender');
+        g.querySelectorAll('.style').forEach((b, i) => {
+          const gg = i === 0 ? 'tjej' : 'kille';
+          b.classList.toggle('on', draft.gender === gg);
+          b.onclick = () => { draft.gender = gg; speak(gg === 'tjej' ? 'Tjej' : 'Kille'); pop(); refresh(); renderOpts(); };
+        });
+        o.append(g);
+      });
+      add('hud', '🎨', 'Hudfärg', 'Välj hudfärg', o => o.append(swatches(OPT.skin, 'skin')), L.skin);
+    } else if (t === 'har') {
+      add('frisyr', '💇', 'Frisyr', 'Välj frisyr', o => o.append(styleGrid(OPT.hair, 'hair')));
+      add('farg', '🎨', 'Hårfärg', 'Välj hårfärg', o => o.append(swatches(OPT.hairColor, 'hairColor')), L.hairColor);
+    } else if (t === 'ansikte') {
+      add('ogon', '👀', 'Ögon', 'Välj ögonfärg', o => o.append(swatches(OPT.eyes, 'eyes')), L.eyes);
+      add('mun', '👄', 'Mun', 'Välj mun', o => o.append(styleGrid(OPT.mouth, 'mouth')));
+      add('extra', '✨', 'Extra', 'Glasögon, fräknar och mer', o => o.append(styleGrid(OPT.extra, 'extra')));
+    } else if (t === 'troja') {
+      const gown = GOWNS.includes(L.top), dress = DRESSES.includes(L.top);
+      add('modell', dress ? '👗' : '👕', 'Tröja', 'Välj tröja eller klänning', o => o.append(styleGrid(OPT.top, 'top')));
+      add('farg', '🎨', 'Färg', gown || dress ? 'Färg på klänningen' : 'Färg på tröjan', o => o.append(swatches(OPT.cloth, 'topColor')), L.topColor);
+      if (!gown) add('monster', '🌈', 'Mönster', 'Välj mönster', o => o.append(styleGrid(OPT.pattern, 'pattern', it => patternBg(it.id, L.topColor, L.topColor2 || '#ffffff'))));
+      const patterned = !gown && L.pattern && L.pattern !== 'enfargad';
+      if (L.top !== 'smoking' || patterned) {
+        add('farg2', '🖌️', patterned ? 'Mönster\u00adfärg' : (SECOND_SHORT[L.top] || 'Färg 2'), patterned ? (SECOND_LONG[L.top] || 'Andra färgen') + ' och mönstret' : (SECOND_LONG[L.top] || 'Andra färgen'),
+          o => o.append(swatches(OPT.cloth, 'topColor2')), L.topColor2 || '#ffffff');
+      }
+      if (!gown) {
+        add('tryck', '⭐', 'Tryck', 'Välj en bild på tröjan', o => o.append(styleGrid(OPT.print, 'print')));
+        if (L.print && L.print !== 'ingen' && !['regnbage', 'smiley', 'raket'].includes(L.print)) add('tryckfarg', '🖍️', 'Tryck\u00adfärg', 'Färg på bilden', o => o.append(swatches(OPT.cloth, 'printColor')), L.printColor || '#ffffff');
+      }
+    } else if (t === 'byxor') {
+      if (DRESSES.includes(L.top)) add('modell', '👖', 'Byxor', 'Byxor', o => o.append(note('👗 Klänningen täcker benen. Välj en tröja under 👕 Tröja om du vill ha byxor.')));
+      else {
+        add('modell', '👖', 'Byxor', 'Välj byxor eller kjol', o => o.append(styleGrid(OPT.bottom, 'bottom')));
+        add('farg', '🎨', 'Färg', 'Färg på byxorna', o => o.append(swatches(OPT.cloth, 'bottomColor')), L.bottomColor);
+      }
+    } else if (t === 'skor') {
+      add('modell', '👟', 'Skor', 'Välj skor', o => o.append(styleGrid(OPT.shoeStyle, 'shoeStyle')));
+      add('farg', '🎨', 'Färg', 'Färg på skorna', o => o.append(swatches(OPT.cloth, 'shoes')), L.shoes);
+    } else if (t === 'hatt') {
+      add('modell', '🧢', 'Hatt', 'Välj hatt, krona eller mössa', o => o.append(styleGrid(OPT.hat, 'hat')));
+      if (L.hat && !['ingen', 'krona'].includes(L.hat)) add('farg', '🎨', 'Färg', 'Färg på hatten', o => o.append(swatches(OPT.cloth, 'hatColor')), L.hatColor);
+    } else if (t === 'drakt') {
+      add('drakt', '🦸', 'Dräkter', 'Färdiga dräkter', o => o.append(note('Välj "Egen" för att designa själv. Hattar går att ha till alla dräkter.'), styleGrid(OPT.outfit, 'outfit')));
+    } else if (t === 'prylar') {
+      add('prylar', '🎒', 'Prylar', 'Prylar till Guldmyntsjakten', renderGear);
+    }
+    return S;
+  }
+  const secSel = {};                      // vald del per flik
   function renderOpts() {
-    const o = $('opts');
-    o.innerHTML = '';
+    const o = $('opts'), chips = $('chips');
+    o.innerHTML = ''; chips.innerHTML = '';
     const L = draft.look;
     const preset = L.outfit && L.outfit !== 'egen';
+    const S = sectionsFor(tab);
+    let cur = S.find(x => x.id === secSel[tab]) || S[0];
+    secSel[tab] = cur.id;
+    chips.style.display = S.length > 1 ? '' : 'none';
+    if (S.length > 1) S.forEach(sec => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (sec === cur ? ' on' : '');
+      // färgdelar visar den valda färgen som en rund prick i stället för en ikon
+      b.innerHTML = (sec.color ? `<i class="dot" style="background:${sec.color}"></i>` : `<span class="ci">${sec.ic}</span>`) + `<span class="cl">${sec.label}</span>`;
+      b.onclick = () => { secSel[tab] = sec.id; speak(sec.label); tone(760, .08, 'sine', .05); renderOpts(); $('opts').scrollTop = 0; };
+      chips.appendChild(b);
+    });
     if (preset && !['drakt', 'hatt'].includes(tab)) o.append(note('🦸 Du har en färdig dräkt på dig. Väljer du något här byter du till din egen design.'));
-    if (tab === 'kropp') {
-      o.append(h4('Tjej eller kille'));
-      const g = styleGrid([{ id: 'tjej', label: 'Tjej', ic: '👧' }, { id: 'kille', label: 'Kille', ic: '👦' }], '__gender');
-      g.querySelectorAll('.style').forEach((b, i) => {
-        const gg = i === 0 ? 'tjej' : 'kille';
-        b.classList.toggle('on', draft.gender === gg);
-        b.onclick = () => { draft.gender = gg; pop(); refresh(); renderOpts(); };
-      });
-      o.append(g, h4('Hudfärg'), swatches(OPT.skin, 'skin'));
-    } else if (tab === 'har') {
-      o.append(h4('Frisyr'), styleGrid(OPT.hair, 'hair'), h4('Hårfärg'), swatches(OPT.hairColor, 'hairColor'));
-    } else if (tab === 'ansikte') {
-      o.append(h4('Ögonfärg'), swatches(OPT.eyes, 'eyes'), h4('Mun'), styleGrid(OPT.mouth, 'mouth'), h4('Extra'), styleGrid(OPT.extra, 'extra'));
-    } else if (tab === 'troja') {
-      const gown = GOWNS.includes(L.top);
-      o.append(h4('Tröja och klänningar'), styleGrid(OPT.top, 'top'), h4(L.top === 'smoking' ? 'Färg på flugan och näsduken' : gown ? 'Färg på klänningen' : 'Färg'), swatches(OPT.cloth, 'topColor'));
-      if (!gown) o.append(h4('Mönster'), styleGrid(OPT.pattern, 'pattern'));
-      // Andra färgen används av alla tröjor (kragar, ärmar, ränder, cape, tröjan under …)
-      const second = {
-        tshirt: 'Färg på krage och ärmkanter', langarm: 'Färg på ärmarna', hoodie: 'Färg på luvsnörena', jacka: 'Färg på tröjan under',
-        linne: 'Färg på kanterna', klanning: 'Färg på skärpet', pike: 'Färg på kragen', vast: 'Färg på skjortan under',
-        fotboll: 'Färg på ränderna', superhjalte: 'Färg på capen', regnjacka: 'Detaljfärg', kofta: 'Färg på tröjan under', smoking: 'Detaljfärg',
-        brollop: 'Färg på bandet i midjan', brudslap: 'Färg på glittret i midjan', balklanning: 'Färg på snörningen och volangkanterna',
-        rosbal: 'Färg på rosorna', tyll: 'Färg på mittenlagret av tyll', glitter: 'Färg på halsbandet'
-      }[L.top] || 'Detaljfärg';
-      const patterned = !gown && L.pattern && L.pattern !== 'enfargad';
-      if (L.top !== 'smoking' || patterned) o.append(h4(patterned ? second + ' / mönstret' : second), swatches(OPT.cloth, 'topColor2'));
-      if (!gown) {
-        o.append(h4('Tryck'), styleGrid(OPT.print, 'print'));
-        if (L.print && L.print !== 'ingen' && !['regnbage', 'smiley', 'raket'].includes(L.print)) o.append(h4('Tryckfärg'), swatches(OPT.cloth, 'printColor'));
-      }
-    } else if (tab === 'byxor') {
-      if (DRESSES.includes(L.top)) o.append(h4('Byxor'), note('👗 Klänningen täcker benen. Välj en annan tröja om du vill byta byxor.'));
-      else o.append(h4('Byxor'), styleGrid(OPT.bottom, 'bottom'), h4('Färg'), swatches(OPT.cloth, 'bottomColor'));
-    } else if (tab === 'skor') {
-      o.append(h4('Skor'), styleGrid(OPT.shoeStyle, 'shoeStyle'), h4('Färg'), swatches(OPT.cloth, 'shoes'));
-    } else if (tab === 'hatt') {
-      o.append(h4('Huvudbonad'), styleGrid(OPT.hat, 'hat'));
-      if (L.hat && !['ingen', 'krona'].includes(L.hat)) o.append(h4('Färg'), swatches(OPT.cloth, 'hatColor'));
-    } else if (tab === 'drakt') {
-      o.append(h4('Färdiga dräkter'), note('Välj "Egen" för att designa själv. Hattar går att ha till alla dräkter.'), styleGrid(OPT.outfit, 'outfit'));
-    } else if (tab === 'prylar') {
-      o.append(h4('Prylar till Guldmyntsjakten'), note(`Prylarna kostar ${GEAR_PRICE} 🪙 (fiskespöt 500 🪙). När du har köpt den trycker du på siffran i Guldmyntsjakten för att ta på den – tryck igen för att ta av.`));
-      const g = document.createElement('div');
-      g.className = 'styles';
-      const p = owner();
-      GEAR.forEach(it => {
-        const owned = !!(p && p.unlocked.includes('gear:' + it.id));
-        const b = document.createElement('button');
-        b.className = 'style' + (gearShown === it.id ? ' on' : '') + (owned ? '' : ' locked');
-        b.innerHTML = `<span class="ic">${it.ic}</span>${it.label}` +
-          (owned ? `<span class="tag ownTag">✅ Tangent ${it.key}</span>` : `<span class="tag">🔒 ${it.price || GEAR_PRICE} 🪙</span>`);
-        b.onclick = () => {
-          gearShown = gearShown === it.id ? null : it.id;     // visa prylen på gubben
-          stage && stage.showGear && stage.showGear(gearShown);
-          pop(); renderOpts();
-          if (!owned) openShop('gear', it);
-        };
-        g.appendChild(b);
-      });
-      o.append(g);
-      const sel = GEAR.find(x => x.id === gearShown);
-      if (sel) o.append(note(`${sel.ic} ${sel.label}: ${sel.tip}`));
-    }
+    o.append(h4(`${cur.ic} ${cur.title}`));
+    cur.render(o);
+  }
+  function renderGear(o) {
+    o.append(note(`Prylarna kostar ${GEAR_PRICE} 🪙 (fiskespöt 500 🪙). När du har köpt den trycker du på siffran i Guldmyntsjakten för att ta på den – tryck igen för att ta av.`));
+    const g = document.createElement('div');
+    g.className = 'styles';
+    const p = owner();
+    GEAR.forEach(it => {
+      const owned = !!(p && p.unlocked.includes('gear:' + it.id));
+      const b = document.createElement('button');
+      b.className = 'style' + (gearShown === it.id ? ' on' : '') + (owned ? '' : ' locked');
+      b.innerHTML = `<span class="ic">${it.ic}</span>${it.label}` +
+        (owned ? `<span class="tag ownTag">✅ Tangent ${it.key}</span>` : `<span class="tag">🔒 ${it.price || GEAR_PRICE} 🪙</span>`);
+      b.onclick = () => {
+        gearShown = gearShown === it.id ? null : it.id;     // visa prylen på gubben
+        stage && stage.showGear && stage.showGear(gearShown);
+        speak(it.label); pop(); renderOpts();
+        if (!owned) openShop('gear', it);
+      };
+      g.appendChild(b);
+    });
+    o.append(g);
+    const sel = GEAR.find(x => x.id === gearShown);
+    if (sel) o.append(note(`${sel.ic} ${sel.label}: ${sel.tip}`));
   }
   const pick = a => a[Math.floor(Math.random() * a.length)];
   const pickOwned = key => pick(OPT[key].filter(o => isOwned(key, o)));
