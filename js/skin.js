@@ -34,6 +34,10 @@ export const EXCLUSIVE = {
     rosatiara: { hat: 'tiara', hatColor: '#ff5ccf', glow: 'rosa' }
   }
 };
+/* Klänningar: tröjan och kjolen sitter ihop och täcker byxorna. GOWNS = långa festklänningar med egen design */
+export const GOWNS = ['brollop', 'brudslap', 'balklanning', 'rosbal', 'tyll', 'glitter'];
+export const DRESSES = ['klanning', ...GOWNS];
+export const isDress = look => DRESSES.includes(look.top);
 export function resolveLook(look) {
   const r = { ...look };
   for (const [k, map] of Object.entries(EXCLUSIVE)) {
@@ -275,7 +279,8 @@ const NECK = [322, 745];
 const LONG = ['langarm', 'hoodie', 'jacka', 'vast', 'regnjacka', 'kofta', 'smoking', 'superhjalte'];
 
 function sleeveRects(top) {
-  if (top === 'linne') return [];
+  if (['linne', 'brollop', 'rosbal', 'tyll', 'glitter'].includes(top)) return [];
+  if (top === 'brudslap') return [[0, 645, 640, 185]];
   if (LONG.includes(top)) return [[0, 645, 640, 185]];
   return [[140, 645, 365, 185]];
 }
@@ -539,7 +544,8 @@ function paintTop(ctx, look) {
   const sleeveCol = top === 'vast' ? shirt : top === 'langarm' ? acc : c1;
   const edge = shade(c1, -0.22);
   const [nx, ny] = NECK;
-  const hasPattern = look.pattern && look.pattern !== 'enfargad' && !smoking;
+  const gown = GOWNS.includes(top);
+  const hasPattern = look.pattern && look.pattern !== 'enfargad' && !smoking && !gown;
 
   ctx.save();
   ctx.beginPath();
@@ -709,10 +715,11 @@ function paintTop(ctx, look) {
       ellipse(ctx, nx, 563, 12, 12, shade(acc, -0.25));
       break;
     default:
-      roundNeck();
+      if (gown) paintGown(ctx, look, top, c1, acc);
+      else roundNeck();
   }
   const pc = look.printColor || (c2 === c1 ? contrast(c1) : c2);
-  const noPrint = !look.print || look.print === 'ingen';
+  const noPrint = !look.print || look.print === 'ingen' || gown;
   if (top === 'superhjalte') {
     poly(ctx, [[nx, 800], [nx + 66, 856], [nx, 928], [nx - 66, 856]], '#ffd84a');
     poly(ctx, [[nx, 812], [nx + 54, 856], [nx, 916], [nx - 54, 856]], acc);
@@ -725,11 +732,109 @@ function paintTop(ctx, look) {
   if (!noPrint && !smoking) printMotif(ctx, look.print, nx, ['jacka', 'kofta'].includes(top) ? 870 : 862, pc);
 }
 
+/* ---------- Festklänningarnas överdel (livstycket) ----------
+   Bålen: framstycket går från halsen (y 745) ner till midjan (y 1024), bakstycket från halsen upp till midjan (y 490). */
+function paintGown(ctx, look, top, c1, acc) {
+  const skin = look.skin, [nx] = NECK, X0 = TORSO[0], X1 = TORSO[0] + TORSO[2];
+  const light = shade(c1, lum(c1) > 0.85 ? -0.1 : 0.2), dark = shade(c1, lum(c1) > 0.85 ? -0.18 : -0.22);
+  // hjärtformad urringning fram: hud ovanför kanten
+  const sweetheart = (yEdge, dip, backEdge) => {
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.moveTo(X0, 745);
+    ctx.lineTo(X0, yEdge);
+    ctx.quadraticCurveTo(X0 + 50, yEdge - 30, nx - 45, yEdge - 18);
+    ctx.quadraticCurveTo(nx - 8, yEdge - 10, nx, yEdge + dip);
+    ctx.quadraticCurveTo(nx + 8, yEdge - 10, nx + 45, yEdge - 18);
+    ctx.quadraticCurveTo(X1 - 50, yEdge - 30, X1, yEdge);
+    ctx.lineTo(X1, 745); ctx.closePath(); ctx.fill();
+    ctx.fillRect(X0, backEdge, X1 - X0, 745 - backEdge + 1);           // ryggen bar ovanför bakkanten
+    return (col, w) => {                                             // kantlinje
+      ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(X0, yEdge);
+      ctx.quadraticCurveTo(X0 + 50, yEdge - 30, nx - 45, yEdge - 18); ctx.quadraticCurveTo(nx - 8, yEdge - 10, nx, yEdge + dip);
+      ctx.quadraticCurveTo(nx + 8, yEdge - 10, nx + 45, yEdge - 18); ctx.quadraticCurveTo(X1 - 50, yEdge - 30, X1, yEdge); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X0, backEdge); ctx.lineTo(X1, backEdge); ctx.stroke();
+    };
+  };
+  const laceAll = (y0, y1, col) => {
+    for (let y = y0 + 16; y < y1; y += 34) for (let x = X0 + 14 + ((y / 34) % 2) * 17; x < X1; x += 34) {
+      for (let k = 0; k < 5; k++) { const a = k * Math.PI * 0.4; ellipse(ctx, x + Math.cos(a) * 6, y + Math.sin(a) * 6, 4.5, 2.6, col, a); }
+    }
+  };
+  const sash = (h = 30) => { ctx.fillStyle = acc; ctx.fillRect(X0, 1024 - h, X1 - X0, h); ctx.fillRect(X0, 490, X1 - X0, h); };
+  const pearls = (pts) => pts.forEach(([x, y]) => { ellipse(ctx, x, y, 6, 6, '#fbf6ee'); ellipse(ctx, x - 2, y - 2, 2.2, 2.2, '#ffffff'); });
+  switch (top) {
+    case 'brollop': {
+      laceAll(490, 1024, dark);
+      const edge = sweetheart(850, 22, 676);
+      edge(dark, 5);
+      const pts = []; for (let x = X0 + 10; x < X1; x += 22) pts.push([x, 1024 - 34]); for (let x = X0 + 10; x < X1; x += 22) pts.push([x, 490 + 34]);
+      sash(26); pearls(pts);
+      break;
+    }
+    case 'brudslap': {
+      laceAll(490, 1024, dark);
+      // V-ringning fram och en djup rygg
+      poly(ctx, [[nx - 62, 745], [nx + 62, 745], [nx, 880]], skin);
+      poly(ctx, [[nx - 70, 746], [nx + 70, 746], [nx, 640]], skin);
+      line(ctx, [[nx - 62, 745], [nx, 880], [nx + 62, 745]], dark, 4);
+      // ärmar i genomskinlig spets
+      ctx.fillStyle = mix(skin, c1, 0.4); ctx.fillRect(0, 645, 640, 185);
+      for (let y = 660; y < 830; y += 30) for (let x = 12 + ((y / 30) % 2) * 15; x < 640; x += 30) for (let k = 0; k < 5; k++) { const a = k * Math.PI * 0.4; ellipse(ctx, x + Math.cos(a) * 5, y + Math.sin(a) * 5, 4, 2.2, c1, a); }
+      for (const x of [0, 612]) { ctx.fillStyle = c1; ctx.fillRect(x, 645, 28, 185); }
+      // smal glittrande midja
+      for (let x = X0 + 8; x < X1; x += 14) { star(ctx, x, 1010, 6, acc, 4); star(ctx, x, 503, 6, acc, 4); }
+      break;
+    }
+    case 'balklanning': {
+      // rak urringning över axlarna, snörning fram, sömmar
+      ctx.fillStyle = skin; ctx.fillRect(X0, 692, X1 - X0, 110);
+      line(ctx, [[X0, 802], [X1, 802]], acc, 8); line(ctx, [[X0, 692], [X1, 692]], acc, 8);
+      for (const x of [X0 + 60, X1 - 60]) { line(ctx, [[x, 806], [x, 1024]], dark, 3); line(ctx, [[x, 688], [x, 490]], dark, 3); }
+      for (let y = 830; y < 990; y += 26) { line(ctx, [[nx - 16, y], [nx + 16, y + 26]], acc, 4); line(ctx, [[nx + 16, y], [nx - 16, y + 26]], acc, 4); ellipse(ctx, nx - 18, y, 4, 4, shade(acc, -0.3)); ellipse(ctx, nx + 18, y, 4, 4, shade(acc, -0.3)); }
+      sash(22);
+      break;
+    }
+    case 'rosbal': {
+      const edge = sweetheart(845, 18, 680);
+      edge(dark, 5);
+      // smala axelband
+      for (const x of [nx - 58, nx + 58]) { ctx.fillStyle = c1; ctx.fillRect(x - 8, 745, 16, 90); ctx.fillRect(x - 8, 680, 16, 66); }
+      // rosor längs urringningen och i midjan
+      const rose = (x, y, r) => { ellipse(ctx, x, y, r, r, acc); ctx.strokeStyle = shade(acc, -0.3); ctx.lineWidth = 2.5; ctx.beginPath(); for (let a = 0; a < 12; a += 0.4) { const rr = r * (1 - a / 13); ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } ctx.stroke(); };
+      for (let x = X0 + 20; x < X1; x += 40) { rose(x, 1006, 11); ellipse(ctx, x + 18, 1012, 7, 3.5, '#3f9a3c', -0.4); }
+      for (const [x, y] of [[nx - 90, 846], [nx + 90, 846], [nx, 880]]) rose(x, y, 13);
+      break;
+    }
+    case 'tyll': {
+      // bara axlar med smala band, glittriga stjärnor
+      ctx.fillStyle = skin; ctx.fillRect(X0, 688, X1 - X0, 120);
+      for (const x of [nx - 66, nx + 66]) { ctx.fillStyle = c1; ctx.fillRect(x - 10, 686, 20, 124); ctx.fillStyle = acc; ctx.fillRect(x - 10, 686, 4, 124); ctx.fillRect(x + 6, 686, 4, 124); }
+      line(ctx, [[X0, 808], [X1, 808]], acc, 7); line(ctx, [[X0, 688], [X1, 688]], acc, 7);
+      let sd = 3; const R = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < 40; i++) { const x = X0 + 10 + R() * (X1 - X0 - 20), y = 500 + R() * 510; if (y > 820 || y < 676) star(ctx, x, y, 5 + R() * 4, light); }
+      sash(26);
+      break;
+    }
+    case 'glitter': {
+      // halterneck: hud på sidorna upptill, glitter överallt
+      let sd = 11; const R = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < 1400; i++) { ctx.fillStyle = R() < 0.55 ? shade(c1, 0.5) : shade(c1, -0.3); ctx.fillRect(X0 + R() * (X1 - X0), 490 + R() * 534, 3, 3); }
+      for (let i = 0; i < 30; i++) star(ctx, X0 + R() * (X1 - X0), 490 + R() * 534, 6, '#ffffff', 4, 0.25);
+      ctx.fillStyle = skin;
+      ctx.beginPath(); ctx.moveTo(X0, 745); ctx.lineTo(X0, 850); ctx.quadraticCurveTo(nx - 60, 850, nx - 26, 745); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(X1, 745); ctx.lineTo(X1, 850); ctx.quadraticCurveTo(nx + 60, 850, nx + 26, 745); ctx.closePath(); ctx.fill();
+      ctx.fillRect(X0, 640, X1 - X0, 106);
+      line(ctx, [[nx - 30, 742], [nx + 30, 742]], acc, 10);
+      break;
+    }
+  }
+}
+
 /* =========================================================
    BYXOR
    ========================================================= */
 const SKIRTS = ['kjol', 'tutu', 'veckkjol'];
-export const isSkirt = look => look.top === 'klanning' || SKIRTS.includes(look.bottom);
+export const isSkirt = look => isDress(look) || SKIRTS.includes(look.bottom);
 
 // Byxtyget: framstycke x 611–818 (båda benen), bakstycke x 826–1024; midja y 764, fotled y 1024
 const LEG_FRONT = [662, 766], LEG_BACK = [876, 975];
@@ -742,7 +847,7 @@ function denim(ctx, x, y, w, h, col) {
   ctx.globalAlpha = 1; ctx.restore();
 }
 function paintBottom(ctx, look) {
-  const dress = look.top === 'klanning';
+  const dress = isDress(look);
   const style = dress ? 'klanning' : (look.bottom || 'byxor');
   const col = dress ? look.topColor : look.bottomColor;
   if (style === 'klanning' || SKIRTS.includes(style)) {
@@ -827,7 +932,7 @@ function paintBottom(ctx, look) {
 
 function paintOverlays(ctx, look) {
   // Snickarbyxor: bröstlapp och hängslen ovanpå tröjan
-  if (look.bottom === 'snickarbyxor' && look.top !== 'klanning') {
+  if (look.bottom === 'snickarbyxor' && !isDress(look)) {
     const c = look.bottomColor, d = shade(c, -0.2);
     roundRect(ctx, 262, 872, 120, 140, 10, c);
     roundRect(ctx, 290, 900, 64, 40, 6, d);

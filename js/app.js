@@ -6,6 +6,9 @@
   const $ = id => document.getElementById(id);
 
   /* ---------- Val i designern ---------- */
+  // Festklänningar (samma lista som i skin.js): egen design, inget mönster/tryck
+  const GOWNS = ['brollop', 'brudslap', 'balklanning', 'rosbal', 'tyll', 'glitter'];
+  const DRESSES = ['klanning', ...GOWNS];
   const OPT = {
     skin: ['#fcd9c4', '#f6b694', '#f59a78', '#d4875e', '#a5623c', '#6b3e26'],
     hair: [
@@ -55,6 +58,12 @@
       { id: 'jacka', label: 'Jacka', ic: '🧥' },
       { id: 'linne', label: 'Linne', ic: '🎽' },
       { id: 'klanning', label: 'Klänning', ic: '👗' },
+      { id: 'brollop', label: 'Bröllopsklänning', ic: '👰', color: '#ffffff', color2: '#ff5ccf' },
+      { id: 'brudslap', label: 'Brudklänning med släp', ic: '💍', color: '#ffffff', color2: '#ffd84a' },
+      { id: 'balklanning', label: 'Balklänning', ic: '💃', color: '#8a5cff', color2: '#ffd84a' },
+      { id: 'rosbal', label: 'Rosenbalklänning', ic: '🌹', color: '#ff5ccf', color2: '#e23b4e' },
+      { id: 'tyll', label: 'Tyllklänning', ic: '🧚', color: '#3ee8ff', color2: '#ff5ccf' },
+      { id: 'glitter', label: 'Glitterklänning', ic: '✨', color: '#2f6db5', color2: '#ffffff' },
       { id: 'pike', label: 'Piké', ic: '🎾', price: 100 },
       { id: 'vast', label: 'Väst', ic: '🦺', price: 100 },
       { id: 'fotboll', label: 'Fotbollströja', ic: '⚽', price: 100 },
@@ -624,7 +633,12 @@
       b.className = 'style' + (draft.look[key] === o.id ? ' on' : '') + (o.soon ? ' soon ' + o.soon : !owned ? ' locked' : '');
       b.innerHTML = `<span class="ic">${o.ic}</span>${o.label}` +
         (o.soon ? '<span class="tag soonTag">Kommer snart</span>' : !owned ? `<span class="tag">🔒 100 🪙</span>` : '');
-      b.onclick = () => { if (!owned) openShop(key, o); else setLook(key, o.id); };
+      b.onclick = () => {
+        if (!owned) return openShop(key, o);
+        // festklänningar får sina egna färger när man väljer dem (går att byta efteråt)
+        if (o.color && draft.look[key] !== o.id) { draft.look.topColor = o.color; if (o.color2) draft.look.topColor2 = o.color2; }
+        setLook(key, o.id);
+      };
       g.appendChild(b);
     });
     return g;
@@ -662,19 +676,25 @@
     } else if (tab === 'ansikte') {
       o.append(h4('Ögonfärg'), swatches(OPT.eyes, 'eyes'), h4('Mun'), styleGrid(OPT.mouth, 'mouth'), h4('Extra'), styleGrid(OPT.extra, 'extra'));
     } else if (tab === 'troja') {
-      o.append(h4('Tröja'), styleGrid(OPT.top, 'top'), h4(L.top === 'smoking' ? 'Färg på flugan och näsduken' : 'Färg'), swatches(OPT.cloth, 'topColor'),
-        h4('Mönster'), styleGrid(OPT.pattern, 'pattern'));
+      const gown = GOWNS.includes(L.top);
+      o.append(h4('Tröja och klänningar'), styleGrid(OPT.top, 'top'), h4(L.top === 'smoking' ? 'Färg på flugan och näsduken' : gown ? 'Färg på klänningen' : 'Färg'), swatches(OPT.cloth, 'topColor'));
+      if (!gown) o.append(h4('Mönster'), styleGrid(OPT.pattern, 'pattern'));
       // Andra färgen används av alla tröjor (kragar, ärmar, ränder, cape, tröjan under …)
       const second = {
         tshirt: 'Färg på krage och ärmkanter', langarm: 'Färg på ärmarna', hoodie: 'Färg på luvsnörena', jacka: 'Färg på tröjan under',
         linne: 'Färg på kanterna', klanning: 'Färg på skärpet', pike: 'Färg på kragen', vast: 'Färg på skjortan under',
-        fotboll: 'Färg på ränderna', superhjalte: 'Färg på capen', regnjacka: 'Detaljfärg', kofta: 'Färg på tröjan under', smoking: 'Detaljfärg'
+        fotboll: 'Färg på ränderna', superhjalte: 'Färg på capen', regnjacka: 'Detaljfärg', kofta: 'Färg på tröjan under', smoking: 'Detaljfärg',
+        brollop: 'Färg på bandet i midjan', brudslap: 'Färg på glittret i midjan', balklanning: 'Färg på snörningen och volangkanterna',
+        rosbal: 'Färg på rosorna', tyll: 'Färg på mittenlagret av tyll', glitter: 'Färg på halsbandet'
       }[L.top] || 'Detaljfärg';
-      if (L.top !== 'smoking' || (L.pattern && L.pattern !== 'enfargad')) o.append(h4((L.pattern && L.pattern !== 'enfargad') ? second + ' / mönstret' : second), swatches(OPT.cloth, 'topColor2'));
-      o.append(h4('Tryck'), styleGrid(OPT.print, 'print'));
-      if (L.print && L.print !== 'ingen' && !['regnbage', 'smiley', 'raket'].includes(L.print)) o.append(h4('Tryckfärg'), swatches(OPT.cloth, 'printColor'));
+      const patterned = !gown && L.pattern && L.pattern !== 'enfargad';
+      if (L.top !== 'smoking' || patterned) o.append(h4(patterned ? second + ' / mönstret' : second), swatches(OPT.cloth, 'topColor2'));
+      if (!gown) {
+        o.append(h4('Tryck'), styleGrid(OPT.print, 'print'));
+        if (L.print && L.print !== 'ingen' && !['regnbage', 'smiley', 'raket'].includes(L.print)) o.append(h4('Tryckfärg'), swatches(OPT.cloth, 'printColor'));
+      }
     } else if (tab === 'byxor') {
-      if (L.top === 'klanning') o.append(h4('Byxor'), note('👗 Klänningen täcker benen. Välj en annan tröja om du vill byta byxor.'));
+      if (DRESSES.includes(L.top)) o.append(h4('Byxor'), note('👗 Klänningen täcker benen. Välj en annan tröja om du vill byta byxor.'));
       else o.append(h4('Byxor'), styleGrid(OPT.bottom, 'bottom'), h4('Färg'), swatches(OPT.cloth, 'bottomColor'));
     } else if (tab === 'skor') {
       o.append(h4('Skor'), styleGrid(OPT.shoeStyle, 'shoeStyle'), h4('Färg'), swatches(OPT.cloth, 'shoes'));

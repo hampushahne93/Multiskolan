@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { paintSkin, loadPreset, shade, resolveLook } from './skin.js';
+import { paintSkin, loadPreset, shade, resolveLook, GOWNS } from './skin.js';
 
 const ASSETS = new URL('../assets/', import.meta.url).href;
 const HEIGHT = 1.75;                 // gubbens längd i scenen (meter)
@@ -48,6 +48,7 @@ function measure(model) {
     lfoot: ['LeftFoot', 'LeftToes', 'LeftToes_end'],
     rfoot: ['RightFoot', 'RightToes', 'RightToes_end'],
     lshin: ['LeftLeg'], rshin: ['RightLeg'],
+    larm: ['LeftArm'], rarm: ['RightArm'],
     neck: ['Neck']
   };
   const out = {};
@@ -82,6 +83,41 @@ function tartan(col) {
   t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 2);
   return t;
 }
+// Tyger till festklänningarna (ritas på canvas, upprepas runt kjolen)
+function fabric(size, draw, rx, ry) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.anisotropy = 4;
+  return t;
+}
+const lumHex = c => lumOf(c);
+// Spets: små blommor, bågar och prickar i en ton mörkare än tyget
+const lace = (col, rx = 10, ry = 4) => fabric(256, (g, S) => {
+  g.fillStyle = col; g.fillRect(0, 0, S, S);
+  const d = lumHex(col) > 0.85 ? '#d9d2e6' : shade(col, -0.16);
+  g.fillStyle = d; g.strokeStyle = d; g.lineWidth = 3;
+  for (const [x, y] of [[64, 64], [192, 192], [192, 64], [64, 192]]) {
+    for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; g.beginPath(); g.ellipse(x + Math.cos(a) * 13, y + Math.sin(a) * 13, 9, 5, a, 0, 7); g.fill(); }
+    g.beginPath(); g.arc(x, y, 30, 0, 7); g.stroke();
+  }
+  for (let x = 0; x <= S; x += 32) for (let y = 0; y <= S; y += 32) if ((x + y) % 64) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
+  for (let x = 0; x < S; x += 32) { g.beginPath(); g.arc(x + 16, S - 4, 16, Math.PI, 0); g.stroke(); }
+}, rx, ry);
+// Glitter: massor av små ljusa och mörka prickar och några stjärnor
+const glitter = (col, rx = 6, ry = 3) => fabric(256, (g, S) => {
+  g.fillStyle = col; g.fillRect(0, 0, S, S);
+  let sd = 7; const R = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 900; i++) { g.fillStyle = R() < 0.55 ? shade(col, 0.55) : shade(col, -0.3); g.fillRect(R() * S, R() * S, 2 + R() * 2, 2 + R() * 2); }
+  g.fillStyle = '#ffffff';
+  for (let i = 0; i < 26; i++) { const x = R() * S, y = R() * S, r = 4 + R() * 4; g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r * 0.25, y); g.lineTo(x, y + r); g.lineTo(x - r * 0.25, y); g.fill(); g.beginPath(); g.moveTo(x - r, y); g.lineTo(x, y + r * 0.25); g.lineTo(x + r, y); g.lineTo(x, y - r * 0.25); g.fill(); }
+}, rx, ry);
+// Tyll med små stjärnor
+const tulle = (col, rx = 8, ry = 3) => fabric(128, (g, S) => {
+  g.fillStyle = col; g.fillRect(0, 0, S, S);
+  g.fillStyle = 'rgba(255,255,255,.9)';
+  for (const [x, y] of [[20, 30], [84, 14], [52, 76], [110, 96], [16, 110]]) { g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, r = i % 2 ? 2.5 : 6; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } g.fill(); }
+}, rx, ry);
 const mat = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, ...extra });
 function mesh(geo, m, x = 0, y = 0, z = 0) {
   const o = new THREE.Mesh(geo, m);
@@ -113,11 +149,177 @@ function tube(pts, r0, r1, m) {
   return grp;
 }
 
+/* Festklänningarnas 3D-delar. Kjolen är en svarvad profil (bred som en klocka eller smal som en pelare). */
+function buildGown(look, parts, G) {
+  const kind = look.top, c1 = look.topColor, c2 = look.topColor2 || '#ffffff';
+  const acc = Math.abs(lumOf(c2) - lumOf(c1)) > 0.18 ? c2 : (lumOf(c1) > 0.55 ? shade(c1, -0.45) : shade(c1, 0.55));
+  const hp = parts.hips, lg = parts.legs;
+  const hsz = hp.getSize(new THREE.Vector3()), lsz = lg.getSize(new THREE.Vector3()), hcen = hp.getCenter(new THREE.Vector3());
+  const floorY = Math.min(parts.lfoot.min.y, parts.rfoot.min.y);
+  const topY = hp.min.y + hsz.y * 0.62;
+  const full = topY - floorY - lsz.y * 0.02;          // midja → strax ovanför golvet
+  const zs = hsz.z / hsz.x * 1.25, r0 = hsz.x * 0.53, LW = lsz.x;
+  const side = { side: THREE.DoubleSide };
+  // Profil uppifrån och ner: radie r(t) och höjd. pow > 1 = vidgar sig snabbt (balklänning), < 1 = smal upptill
+  const bell = (len, R, pow, n = 18, rStart = r0) => {
+    const pts = [];
+    for (let i = 0; i <= n; i++) { const t = i / n; pts.push(new THREE.Vector2(rStart + (R - rStart) * (1 - Math.pow(1 - t, pow)), -len * t)); }
+    return pts;
+  };
+  // deform(x, y, z, t, a) -> [x, y, z] (a = vinkel runt kroppen, 0 = framåt)
+  const lathe = (pts, m, { y0 = topY, segs = 56, deform = null, zScale = zs, group = G.hips } = {}) => {
+    const g = new THREE.LatheGeometry(pts, segs);
+    const p = g.attributes.position, yTop = pts[0].y, yBot = pts[pts.length - 1].y;
+    if (deform) {
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        const [nx, ny, nz] = deform(x, y, z, (y - yTop) / (yBot - yTop || -1), Math.atan2(x, z));
+        p.setXYZ(i, nx, ny, nz);
+      }
+    }
+    g.computeVertexNormals();
+    const sk = mesh(g, m, hcen.x, y0, hcen.z);
+    sk.scale.z = zScale;
+    group.add(sk);
+    return sk;
+  };
+  const radiusAt = (pts, t) => { const f = t * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)); return pts[i].x + (pts[i + 1].x - pts[i].x) * (f - i); };
+  const wavy = (amp, n) => (x, y, z, t, a) => { const k = 1 + amp * Math.cos(a * n) * t; return [x * k, y, z * k]; };
+  // Extra plats fram nertill så fötterna inte sticker ut genom kjolen när man springer
+  const roomy = (need, then = null) => (x, y, z, t, a) => {
+    const f = Math.pow(Math.max(0, Math.cos(a)), 0.7), want = need * Math.pow(t, 1.1) / zs, extra = Math.max(0, want - Math.hypot(x, z));
+    return then ? then(x, y, z + extra * f, t, a) : [x, y, z + extra * f];
+  };
+  const pearl = mat('#fffaf2', { roughness: 0.25, metalness: 0.15 });
+
+  if (kind === 'brollop') {
+    // Stor vit brudklänning med spets, pärlkant och slöja
+    const pts = bell(full, LW * 1.55, 1.9);
+    lathe(pts, mat('#ffffff', { ...side, roughness: 0.8, map: lace(c1, 12, 5) }), { deform: wavy(0.035, 18) });
+    // pärlband nertill och i midjan
+    const hem = mesh(new THREE.TorusGeometry(LW * 1.55, lsz.y * 0.035, 8, 64), pearl, hcen.x, topY - full + lsz.y * 0.03, hcen.z);
+    hem.rotation.x = Math.PI / 2; hem.scale.y = zs; G.hips.add(hem);
+    const belt = mesh(new THREE.TorusGeometry(r0 * 1.02, lsz.y * 0.05, 8, 40), mat(acc, { roughness: 0.4 }), hcen.x, topY - lsz.y * 0.02, hcen.z);
+    belt.rotation.x = Math.PI / 2; belt.scale.y = zs; G.hips.add(belt);
+  } else if (kind === 'brudslap') {
+    // Smal brudklänning i spets som slutar i ett långt släp bakåt
+    const pts = bell(full, LW * 1.2, 1.15);
+    const L = full * 0.95;
+    lathe(pts, mat('#ffffff', { ...side, roughness: 0.8, map: lace(c1, 10, 5) }), {
+      segs: 64,
+      deform: roomy(LW * 1.6, (x, y, z, t, a) => {
+        const back = Math.max(0, -Math.cos(a)), k = Math.pow(Math.max(0, (t - 0.3) / 0.7), 2) * Math.pow(back, 1.3);
+        return [x * (1 + 0.25 * k), y, z - L * k / zs];
+      })
+    });
+    const belt = mesh(new THREE.TorusGeometry(r0 * 1.02, lsz.y * 0.045, 8, 40), mat(acc, { roughness: 0.3, metalness: 0.4 }), hcen.x, topY - lsz.y * 0.02, hcen.z);
+    belt.rotation.x = Math.PI / 2; belt.scale.y = zs; G.hips.add(belt);
+  } else if (kind === 'balklanning') {
+    // Bred klocka med tre volanger
+    const R = LW * 1.75;
+    const pts = bell(full, R, 2.6);
+    lathe(pts, mat(c1, { ...side, roughness: 0.55 }));
+    const tiers = [0.42, 0.64, 0.86];
+    tiers.forEach((t0, i) => {
+      const rr = radiusAt(pts, t0) * 1.03, len = full * 0.2, rb = radiusAt(pts, Math.min(1, t0 + 0.2)) * 1.06;
+      const band = [new THREE.Vector2(rr, 0), new THREE.Vector2((rr + rb) / 2 * 1.02, -len * 0.5), new THREE.Vector2(rb, -len)];
+      lathe(band, mat(i % 2 ? c1 : shade(c1, 0.14), { ...side, roughness: 0.55 }), { y0: topY - full * t0, deform: wavy(0.06, 22) });
+      const trim = mesh(new THREE.TorusGeometry(rb, lsz.y * 0.022, 6, 64), mat(acc, { roughness: 0.4 }), hcen.x, topY - full * t0 - len, hcen.z);
+      trim.rotation.x = Math.PI / 2; trim.scale.y = zs; G.hips.add(trim);
+    });
+    // rosett bak i midjan
+    const bow = mat(acc, { roughness: 0.45 });
+    for (const s of [-1, 1]) {
+      const loop = mesh(new THREE.SphereGeometry(1, 14, 10), bow, hcen.x + s * hsz.x * 0.22, topY - lsz.y * 0.02, hcen.z - hsz.z * 0.62);
+      loop.scale.set(hsz.x * 0.2, lsz.y * 0.12, hsz.z * 0.1); loop.rotation.z = s * 0.35; G.hips.add(loop);
+    }
+    G.hips.add(mesh(new THREE.SphereGeometry(hsz.x * 0.07, 10, 8), bow, hcen.x, topY - lsz.y * 0.02, hcen.z - hsz.z * 0.66));
+    // puffärmar på överarmarna
+    for (const k of ['larm', 'rarm']) {
+      const ab = parts[k]; if (!ab || ab.isEmpty()) continue;
+      const asz = ab.getSize(new THREE.Vector3()), ac = ab.getCenter(new THREE.Vector3());
+      const dir = Math.sign(ac.x) || 1, x0 = dir > 0 ? ab.min.x : ab.max.x;
+      const th = Math.max(asz.y, asz.z);
+      const puff = mesh(new THREE.SphereGeometry(1, 18, 12), mat(c1, { roughness: 0.55 }), x0 + dir * asz.x * 0.2, ac.y, ac.z);
+      puff.scale.set(asz.x * 0.3, th * 0.85, th * 0.85);
+      G[k].add(puff);
+      const cuff = mesh(new THREE.TorusGeometry(th * 0.62, th * 0.1, 8, 24), mat(acc, { roughness: 0.4 }), x0 + dir * asz.x * 0.46, ac.y, ac.z);
+      cuff.rotation.y = Math.PI / 2; G[k].add(cuff);
+    }
+  } else if (kind === 'rosbal') {
+    // Rosklänning: kjolen är lager av rundade kronblad, rosor i midjan
+    const R = LW * 1.5;
+    const pts = bell(full, R, 2.1);
+    lathe(pts, mat(shade(c1, -0.12), { ...side, roughness: 0.6 }));
+    const layers = [0.0, 0.25, 0.5, 0.72];
+    layers.forEach((t0, i) => {
+      const rr = radiusAt(pts, t0) * 1.02, t1 = Math.min(1, t0 + 0.34), rb = radiusAt(pts, t1) * 1.05, len = full * (t1 - t0);
+      const band = [new THREE.Vector2(rr, 0), new THREE.Vector2((rr + rb) / 2 * 1.03, -len * 0.55), new THREE.Vector2(rb, -len)];
+      const petals = 9 + i * 2;
+      lathe(band, mat(shade(c1, 0.12 - i * 0.07), { ...side, roughness: 0.6 }), {
+        y0: topY - full * t0, segs: 72,
+        deform: (x, y, z, t, a) => { const w = Math.abs(Math.sin(a * petals / 2)); return [x, y + len * 0.28 * t * (1 - Math.pow(1 - w, 3)) , z]; }
+      });
+    });
+    // tre rosor i midjan (fram till vänster)
+    const roseM = mat(acc, { roughness: 0.5 }), leafM = mat('#3f9a3c', { roughness: 0.6 });
+    [[-0.32, 0], [-0.12, -0.05], [-0.48, -0.08]].forEach(([fx, fy], i) => {
+      const rs = hsz.x * (i ? 0.075 : 0.1), ang = fx * 1.6;
+      const px = hcen.x + Math.sin(ang) * r0 * 1.05, pz = hcen.z + Math.cos(ang) * r0 * zs * 1.02, py = topY + fy * lsz.y;
+      for (let k = 0; k < 3; k++) {
+        const ring = mesh(new THREE.TorusGeometry(rs * (1 - k * 0.3), rs * 0.32, 8, 20), roseM, px, py, pz);
+        ring.lookAt(px + Math.sin(ang) * 10, py, pz + Math.cos(ang) * 10); ring.position.addScaledVector(new THREE.Vector3(Math.sin(ang), 0, Math.cos(ang)), rs * k * 0.25);
+        G.hips.add(ring);
+      }
+      const leaf = mesh(new THREE.SphereGeometry(rs * 0.9, 8, 6), leafM, px + rs * 1.1, py - rs * 0.6, pz);
+      leaf.scale.set(1, 0.45, 0.35); leaf.rotation.z = -0.6; G.hips.add(leaf);
+    });
+  } else if (kind === 'tyll') {
+    // Tyllklänning till vaden: tre genomskinliga lager med stjärnor och ett fodral under
+    const len = full * 0.78;
+    lathe(bell(len * 0.9, LW * 0.95, 1.6), mat(c1, { ...side, roughness: 0.7 }));
+    const layers = [[LW * 1.25, c1, 1.0], [LW * 1.15, acc, 0.94], [LW * 1.05, shade(c1, 0.3), 0.86]];
+    layers.forEach(([R, col, f], i) => {
+      lathe(bell(len * f, R, 1.8), mat('#ffffff', { ...side, roughness: 0.6, transparent: true, opacity: 0.58, depthWrite: false, map: tulle(col, 8 + i * 2, 3) }), { deform: wavy(0.05, 16 + i * 4) }).renderOrder = 2 + i;
+    });
+    const belt = mesh(new THREE.TorusGeometry(r0 * 1.02, lsz.y * 0.05, 8, 40), mat(acc, { roughness: 0.4 }), hcen.x, topY - lsz.y * 0.02, hcen.z);
+    belt.rotation.x = Math.PI / 2; belt.scale.y = zs; G.hips.add(belt);
+  } else if (kind === 'glitter') {
+    // Lång glittrig galaklänning: smal och rak, lite utsvängd nertill
+    const mid = LW * 1.0, R = LW * 1.38, pts = [];
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20, r = t < 0.5 ? r0 + (mid - r0) * Math.sin(t / 0.5 * Math.PI / 2) : mid + (R - mid) * Math.pow((t - 0.5) / 0.5, 1.6);
+      pts.push(new THREE.Vector2(r, -full * t));
+    }
+    lathe(pts, mat('#ffffff', { ...side, roughness: 0.3, metalness: 0.35, map: glitter(c1, 8, 4) }), { deform: roomy(LW * 1.6, wavy(0.03, 14)) });
+  }
+
+  // Slöja och pärldiadem till den stora brudklänningen (inte om man har en hatt, men gärna med krona eller tiara)
+  if (kind === 'brollop' && ['ingen', 'krona', 'tiara', undefined].includes(look.hat)) {
+    const hb = parts.head, c = hb.getCenter(new THREE.Vector3()), s = hb.getSize(new THREE.Vector3());
+    const W = s.x, H = s.y, D = s.z, top = hb.max.y;
+    const len = H * 2.3;
+    const veil = mesh(new THREE.CylinderGeometry(W * 0.4, W * 0.95, len, 28, 6, true, Math.PI / 2 + 0.25, Math.PI - 0.5),
+      mat('#ffffff', { side: THREE.DoubleSide, transparent: true, opacity: 0.5, depthWrite: false, roughness: 0.9 }), c.x, top - H * 0.08 - len / 2, c.z - D * 0.12);
+    veil.rotation.x = -0.1;
+    veil.renderOrder = 3;
+    G.head.add(veil);
+    if (!look.hat || look.hat === 'ingen') {
+      const band = mesh(new THREE.TorusGeometry(W * 0.56, W * 0.03, 8, 32, Math.PI), pearl, c.x, top - H * 0.42, c.z - D * 0.02);
+      band.rotation.y = 0; G.head.add(band);
+      for (let i = 0; i <= 8; i++) {
+        const a = i / 8 * Math.PI;
+        G.head.add(mesh(new THREE.SphereGeometry(W * 0.045, 8, 6), pearl, c.x + Math.cos(a) * W * 0.56, top - H * 0.42 + Math.sin(a) * W * 0.56, c.z - D * 0.02 + W * 0.03));
+      }
+    }
+  }
+}
+
 /* Hår, hattar, kjol, cape och skodelar som 3D. Koordinater i modellens enheter. */
 const sph = (r, w = 14, h = 10) => new THREE.SphereGeometry(r, w, h);
 function buildExtras(lookIn, parts) {
   const look = resolveLook(lookIn);
-  const G = { head: new THREE.Group(), hips: new THREE.Group(), chest: new THREE.Group(), lfoot: new THREE.Group(), rfoot: new THREE.Group(), lshin: new THREE.Group(), rshin: new THREE.Group() };
+  const G = { head: new THREE.Group(), hips: new THREE.Group(), chest: new THREE.Group(), lfoot: new THREE.Group(), rfoot: new THREE.Group(), lshin: new THREE.Group(), rshin: new THREE.Group(), larm: new THREE.Group(), rarm: new THREE.Group() };
   const head = G.head;
   const hb = parts.head, c = hb.getCenter(new THREE.Vector3()), s = hb.getSize(new THREE.Vector3());
   const top = hb.max.y, back = hb.min.z, front = hb.max.z, W = s.x, H = s.y, D = s.z;
@@ -381,9 +583,13 @@ function buildExtras(lookIn, parts) {
     }
   }
 
+  // Festklänningar: långa kjolar, släp, volanger, slöja och puffärmar
+  const gown = !preset && GOWNS.includes(look.top);
+  if (gown) buildGown(look, parts, G);
+
   // Kjolar
   const dress = look.top === 'klanning';
-  const skirtType = dress ? 'klanning' : look.bottom;
+  const skirtType = dress ? 'klanning' : gown ? null : look.bottom;
   if (!preset && ['klanning', 'kjol', 'tutu', 'veckkjol'].includes(skirtType)) {
     const hp = parts.hips, lg = parts.legs;
     const hsz = hp.getSize(new THREE.Vector3()), lsz = lg.getSize(new THREE.Vector3()), hcen = hp.getCenter(new THREE.Vector3());
@@ -647,7 +853,7 @@ async function createCharacter(look, gender) {
 
   // 3D-tillbehör fästs på huvud- och höftbenet
   const ex = buildExtras(look, A.parts);
-  const boneFor = { head: 'Head', hips: 'Hips', chest: bones.UpperChest ? 'UpperChest' : 'Chest', lfoot: 'LeftFoot', rfoot: 'RightFoot', lshin: 'LeftLeg', rshin: 'RightLeg' };
+  const boneFor = { head: 'Head', hips: 'Hips', chest: bones.UpperChest ? 'UpperChest' : 'Chest', lfoot: 'LeftFoot', rfoot: 'RightFoot', lshin: 'LeftLeg', rshin: 'RightLeg', larm: 'LeftArm', rarm: 'RightArm' };
   for (const k in ex) root.add(ex[k]);
   root.updateMatrixWorld(true);
   const spinners = [];
@@ -1164,12 +1370,13 @@ export function preload() { return loadAssets(); }
 export { createCharacter, loadAssets };
 
 /* Helbild (används för tester och kan användas till förhandsvisningar) */
-export function renderSnapshot(look, gender, { size = 320, view = 'front', anim = 0.35 } = {}) {
+export function renderSnapshot(look, gender, { size = 320, view = 'front', anim = 0.35, pose = null } = {}) {
   const job = portraitQueue.then(async () => {
     await loadAssets();
     const { renderer, scene, camera } = portraitRig();
     renderer.setSize(size, size, false);
     const c = await createCharacter(look, gender);
+    if (pose) c.play(pose, 0);
     c.update(anim);
     scene.add(c.root);
     const z = view === 'back' ? -3.4 : 3.4, x = view === 'side' ? 3.4 : 0.6;
