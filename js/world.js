@@ -5,6 +5,7 @@
    ========================================================= */
 import * as THREE from 'three';
 import { mergeStatic } from './merge.js';
+import { buildCastle } from './castle.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
 export const HALF = 135;              // kartan går från -135 till +135 meter
@@ -94,6 +95,44 @@ export const HOUSE_KITS = {
   }
 }
 
+/* ---------- Slottet: på en plan plats en bit från mitten, porten vänd mot kartans mitt ---------- */
+// hw/hd = halva storleken på slottsplanen (lokalt). Själva slottet med torn är ±20 × ±17 m.
+export const CASTLE = { x: 0, z: 70, yaw: Math.PI, h: 2, hw: 27, hd: 24 };
+{
+  let best = null;
+  for (let x = -80; x <= 80; x += 5) for (let z = -80; z <= 80; z += 5) {
+    if (Math.hypot(x, z) < 52) continue;
+    if (Math.abs(x - TOWN.x) < TOWN.hw + 36 && Math.abs(z - TOWN.z) < TOWN.hd + 36) continue;
+    const hs = [];
+    for (let i = -1; i <= 1.001; i += 0.25) for (let j = -1; j <= 1.001; j += 0.25) hs.push(baseHeight(x + i * 26, z + j * 26));
+    const mean = hs.reduce((p, c) => p + c, 0) / hs.length;
+    if (Math.min(...hs) < WATER + 0.6) continue;
+    const score = hs.reduce((p, c) => p + (c - mean) ** 2, 0) / hs.length + Math.abs(mean - 2.5) * 0.05 + Math.hypot(x, z) * 0.004;
+    if (!best || score < best.score) best = { x, z, h: mean, score };
+  }
+  if (best) {
+    CASTLE.x = best.x; CASTLE.z = best.z;
+    CASTLE.h = Math.max(WATER + 1.6, Math.min(6, best.h));
+    CASTLE.yaw = Math.round(Math.atan2(-best.x, -best.z) / (Math.PI / 2)) * (Math.PI / 2);
+  }
+}
+const castleSwap = () => Math.abs(Math.sin(CASTLE.yaw)) > 0.5;
+// Avstånd till slottsplanen (0 = på planen)
+export function castleDist(x, z) {
+  const hw = castleSwap() ? CASTLE.hd : CASTLE.hw, hd = castleSwap() ? CASTLE.hw : CASTLE.hd;
+  return Math.hypot(Math.max(0, Math.abs(x - CASTLE.x) - hw), Math.max(0, Math.abs(z - CASTLE.z) - hd));
+}
+// Punkt i slottets egna koordinater (porten åt +z)
+export function castleLocal(x, z) {
+  const dx = x - CASTLE.x, dz = z - CASTLE.z, c = Math.cos(CASTLE.yaw), s = Math.sin(CASTLE.yaw);
+  return [dx * c - dz * s, dx * s + dz * c];
+}
+function inCastleBuilt(x, z) {
+  if (castleDist(x, z) > 0) return false;
+  const [lx, lz] = castleLocal(x, z);
+  return (Math.abs(lx) < 21 && Math.abs(lz) < 18) || (Math.abs(lx) < 3.5 && lz > 0 && lz < 26);   // slottet + gången till porten
+}
+
 /* ---------- Gårdar: en i varje hörn, på plana platser ---------- */
 export const FARMS = [];
 {
@@ -104,7 +143,7 @@ export const FARMS = [];
     if (best) break;
     for (let a = lo; a <= hi; a += 5) for (let b = lo; b <= hi; b += 5) {
       const x = sx * a, z = sz * b, hs = [];
-      if (townDist(x, z) < PAD + 18) continue;
+      if (townDist(x, z) < PAD + 18 || castleDist(x, z) < PAD + 18) continue;
       for (let k = 0; k < 16; k++) { const t = k / 16 * Math.PI * 2; hs.push(baseHeight(x + Math.cos(t) * PAD, z + Math.sin(t) * PAD)); hs.push(baseHeight(x + Math.cos(t) * PAD * 0.5, z + Math.sin(t) * PAD * 0.5)); }
       hs.push(baseHeight(x, z));
       const mean = hs.reduce((p, c) => p + c, 0) / hs.length;
@@ -124,7 +163,7 @@ export const FARMS = [];
   for (let n = 0; n < 2; n++) {
     let best = null;
     for (let x = -100; x <= 100; x += 5) for (let z = -100; z <= 100; z += 5) {
-      if (Math.hypot(x, z) < 45 || townDist(x, z) < PADB + 18 || FARMS.some(f => Math.hypot(x - f.x, z - f.z) < f.pad + PADB + 22)) continue;
+      if (Math.hypot(x, z) < 45 || townDist(x, z) < PADB + 18 || castleDist(x, z) < PADB + 18 || FARMS.some(f => Math.hypot(x - f.x, z - f.z) < f.pad + PADB + 22)) continue;
       const hs = [];
       for (let k = 0; k < 16; k++) { const t = k / 16 * Math.PI * 2; hs.push(baseHeight(x + Math.cos(t) * PADB, z + Math.sin(t) * PADB)); hs.push(baseHeight(x + Math.cos(t) * PADB * 0.5, z + Math.sin(t) * PADB * 0.5)); }
       const mean = hs.reduce((p, c) => p + c, 0) / hs.length;
@@ -147,9 +186,11 @@ function rawHeight(x, z) {
   }
   const td = townDist(x, z);
   if (td < 16) h += (TOWN.h - h) * (1 - sstep(0, 16, td));
+  const cd = castleDist(x, z);
+  if (cd < 16) h += (CASTLE.h - h) * (1 - sstep(0, 16, cd));
   return h;
 }
-const inFarm = (x, z, extra = 0) => (extra >= 0 ? townDist(x, z) < 2 + extra * 0.5 : inTownBuilt(x, z)) || FARMS.some(f => Math.hypot(x - f.x, z - f.z) < f.pad + extra);
+const inFarm = (x, z, extra = 0) => (extra >= 0 ? townDist(x, z) < 2 + extra * 0.5 || castleDist(x, z) < 2 + extra * 0.5 : inTownBuilt(x, z) || inCastleBuilt(x, z)) || FARMS.some(f => Math.hypot(x - f.x, z - f.z) < f.pad + extra);
 // Gator och husgrunder i staden (inget gräs där)
 function inTownBuilt(x, z) {
   if (townDist(x, z) > 0) return false;
@@ -211,6 +252,17 @@ function groundColor(x, z, h, slope, out) {
   if (slope > 0.6) out.lerp(C('#8a7f9e'), sstep(0.6, 1.2, slope));            // sten i branter
   if (h > 16) out.lerp(C('#9a90b5'), sstep(16, 28, h));                       // berg
   if (h > 30) out.lerp(C('#f2f0ff'), sstep(30, 38, h));                       // snötoppar
+  {                                                                             // slottsplanen: kullersten närmast slottet och en gång till porten
+    const cd = castleDist(x, z);
+    if (cd < 6) {
+      const [lx, lz] = castleLocal(x, z);
+      const k = 1 - sstep(0, 6, cd);
+      out.lerp(C('#6cc24f'), 0.45 * k);
+      const ring = Math.max(Math.abs(lx) - 20, Math.abs(lz) - 17);
+      const path = Math.abs(lx) < 3.2 && lz > 0 ? 0 : 99;
+      if (ring < 3.5 || path < 1) out.lerp(C(n > 0.5 ? '#b8b0c6' : '#a9a1b8'), 0.9 * k);
+    }
+  }
   if (townDist(x, z) < 6) {                                                     // staden: kortklippt gräs och gator
     const k = 1 - sstep(0, 6, townDist(x, z));
     out.lerp(C('#6cc24f'), 0.5 * k);
@@ -940,6 +992,10 @@ export async function loadFarms(scene, colliders) {
     });
   }
 
+  /* ---------- Slottet ---------- */
+  const castle = buildCastle({ scene, colliders, C: CASTLE, plankTex });
+  barns.push(castle.gate);                       // porten öppnas som en ladudörr
+
   /* ---------- Resten av kistplatserna ute i naturen (alltid samma) ---------- */
   {
     const R = rng(4711);
@@ -950,7 +1006,7 @@ export async function loadFarms(scene, colliders) {
     while (chestSpots.length < 100 && tries++ < 20000) {
       const x = (R() * 2 - 1) * (PLAY - 8), z = (R() * 2 - 1) * (PLAY - 8), h = heightAt(x, z);
       if (h < WATER + 0.7 || h > 18 || slopeAt(x, z) > 0.35) continue;
-      if (Math.hypot(x, z) < 12 || inTownBuilt(x, z)) continue;
+      if (Math.hypot(x, z) < 12 || inTownBuilt(x, z) || castleDist(x, z) < 3) continue;
       if (chestSpots.some(s => Math.hypot(s.x - x, s.z - z) < 13)) continue;
       if (!free(x, z) || rockHeightAt(x, z) > h - 0.5) continue;
       chestSpots.push({ x, z, y: h, rot: R() * Math.PI * 2, where: 'ute' });
@@ -966,7 +1022,7 @@ export async function loadFarms(scene, colliders) {
 
   const ease = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
   return {
-    barns, platforms, chestSpots,
+    barns, platforms, chestSpots, castle,
     platformAt(x, z) { let y = -Infinity; for (const p of platforms) if (x > p.minX && x < p.maxX && z > p.minZ && z < p.maxZ && p.y > y) y = p.y; return y; },
     update(t, dt) {
       for (const s of spinners) s.rotation.z -= dt * 0.9;

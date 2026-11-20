@@ -34,7 +34,7 @@ const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1400);
 
 const world = buildWorld(scene, { lowSpec: touch });
 let farms = null;
-loadFarms(scene, world.colliders).then(f => { farms = f; return spawnChests(f.chestSpots); })
+loadFarms(scene, world.colliders).then(f => { farms = f; return spawnChests(f.chestSpots, f.castle ? f.castle.spots : []); })
   .then(() => import('./animals.js')).then(m => m.spawnAnimals(scene, world)).then(a => { animals = a; })
   .catch(e => console.error('Gårdar/djur', e));
 let animals = null;
@@ -42,7 +42,8 @@ let animals = null;
 /* ---------- Skattkistor: 10 st på slumpade platser av 100 möjliga ---------- */
 const CHESTS = 10, chests = [];
 const CHEST_COLORS = { DarkMetal: '#4b4b58', Wood: '#a0602c', Metal: '#9097a6', Gold: '#ffcc3a', Gold_Dark: '#d0901c' };
-async function spawnChests(spots) {
+const CASTLE_CHESTS = 5;                         // slottet får alltid 5 egna kistor (slumpade platser)
+async function spawnChests(spots, castleSpots = []) {
   const src = await new FBXLoader().loadAsync(new URL('../assets/props/Chest.fbx', import.meta.url).href);
   const mats = {};
   src.traverse(o => {
@@ -60,7 +61,8 @@ async function spawnChests(spots) {
   // Nergrävda kistor (2 st) väljs bland utomhusplatserna som inte används, syns inte på kartan
   const buried = outside.slice(CHESTS, CHESTS + 2);
   for (const s of inside) { if (picked.length >= nIn) break; if (!used.has(s.bid)) { used.add(s.bid); picked.push(s); } }   // max en kista per hus/lada
-  for (const s of [...picked, ...outside.slice(0, CHESTS - picked.length)]) {
+  const castlePicked = shuffle(castleSpots.slice()).slice(0, CASTLE_CHESTS);
+  for (const s of [...picked, ...outside.slice(0, CHESTS - picked.length), ...castlePicked]) {
     const o = SkeletonUtils.clone(src);
     o.scale.setScalar(0.0055);
     o.position.set(s.x, s.y, s.z);
@@ -72,11 +74,9 @@ async function spawnChests(spots) {
     const star = new THREE.Sprite(starMat);
     star.position.set(s.x, s.y + 1.7, s.z); star.scale.setScalar(0.7);
     scene.add(star);
-    world.colliders.push({ x: s.x, z: s.z, r: 0.6, top: s.y + 0.95 });
+    world.colliders.push({ x: s.x, z: s.z, r: 0.6, top: s.y + 0.95, bottom: s.y - 0.1 });
     chests.push({ ...s, obj: o, lids, star, open: false, t: 0 });
   }
-  // En av kistorna ger 1 minut extra speltid i stället för mynt
-  chests[Math.floor(Math.random() * chests.length)].bonusTime = true;
   // Nergrävda kistor: bara en liten jordhög, ingen stjärna och inte på kartan
   for (const s of buried) {
     const o = SkeletonUtils.clone(src);
@@ -146,12 +146,6 @@ function openChest(c) {
   if (c.open) return;
   c.open = true;
   coinBurst(c);
-  if (c.bonusTime) {                                  // tidskistan
-    if (timeLeft !== null && !timeUp) timeLeft += 60;
-    $('timer').classList.remove('bump'); void $('timer').offsetWidth; $('timer').classList.add('bump');
-    toast('⏱️ +1 minut extra speltid!');
-    return;
-  }
   // 1 eller 2 guldmynt per kista (50/50), nergrävda kistor ger dubbelt
   const n = (Math.random() < 0.5 ? 1 : 2) * (c.buried ? 2 : 1);
   giveCoins(n);
@@ -218,6 +212,14 @@ function drawMinimap(x, z, heading) {
   for (const h of TOWN.houses) {   // husen i staden
     const hx = ((h.x + HALF) / (HALF * 2)) * s, hz = ((h.z + HALF) / (HALF * 2)) * s, r = h.type === 4 ? 4 : 2.5;
     mctx.fillRect(hx - r, hz - 2.5, r * 2, 5); mctx.strokeRect(hx - r, hz - 2.5, r * 2, 5);
+  }
+  if (farms && farms.castle) {   // slottet: borg + fyra torn
+    const M = v => (v + HALF) / (HALF * 2) * s;
+    mctx.fillStyle = '#efe7fb'; mctx.strokeStyle = '#7a3cff'; mctx.lineWidth = 1.5;
+    for (const r of [farms.castle.rect, ...farms.castle.towers]) { mctx.fillRect(M(r.minX), M(r.minZ), M(r.maxX) - M(r.minX), M(r.maxZ) - M(r.minZ)); mctx.strokeRect(M(r.minX), M(r.minZ), M(r.maxX) - M(r.minX), M(r.maxZ) - M(r.minZ)); }
+    const cr = farms.castle.rect;
+    mctx.fillStyle = '#ff6fae'; mctx.font = 'bold 11px sans-serif'; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+    mctx.fillText('👑', M((cr.minX + cr.maxX) / 2), M((cr.minZ + cr.maxZ) / 2));
   }
   for (const f of FARMS) {   // gårdar och stora lador
     const fx = ((f.x + HALF) / (HALF * 2)) * s, fz = ((f.z + HALF) / (HALF * 2)) * s, r = f.kind === 'big' ? 6 : 4;
@@ -293,7 +295,6 @@ createCharacter(look, player ? player.gender : 'kille').then(c => {
   for (const id of gearOn) c.setGear(id, true);
   $('loading').classList.add('hide');
   showHelp();
-  timeLeft = GAME_TIME;          // klockan startar när gubben är laddad
 }).catch(e => {
   console.error(e);
   $('loading').innerHTML = '<div>😕 Kunde inte ladda gubben.<br>Ladda om sidan.</div>';
@@ -394,11 +395,13 @@ function collide(nx, nz, ox0, oz0) {
       if (c.box || c.active === false) continue;
       if (c.jump && P.y > c.jump) continue;                   // hoppar över staketet
       if (c.top && P.y > c.top - 0.05) continue;              // hoppar över höbal
+      if (c.bottom !== undefined && P.y + 1.6 <= c.bottom) continue;   // sak på våningen ovanför
       const dx = nx - c.x, dz = nz - c.z, rr = c.r + 0.35, dd = dx * dx + dz * dz;
       if (dd < rr * rr && dd > 0.0001) { const k = rr / Math.sqrt(dd); nx = c.x + dx * k; nz = c.z + dz * k; }
     }
     for (const c of nearCols) {
       if (!c.box || c.active === false) continue;              // öppen ladudörr
+      if (c.bottom !== undefined && (P.y >= c.top - 0.05 || P.y + 1.6 <= c.bottom)) continue;   // vägg/räcke på en annan våning
       const ex = c.hw + 0.35, ez = c.hd + 0.35;
       const px = nx - c.x, pz = nz - c.z, ox = ex - Math.abs(px), oz = ez - Math.abs(pz);
       if (ox <= 0 || oz <= 0) continue;
@@ -415,7 +418,14 @@ function collide(nx, nz, ox0, oz0) {
 function barnAt(x, z) {
   return farms ? farms.barns.find(b => x > b.inner.minX - 0.15 && x < b.inner.maxX + 0.15 && z > b.inner.minZ - 0.15 && z < b.inner.maxZ + 0.15) : null;
 }
-function groundAt(x, z) { const b = barnAt(x, z); return b ? b.floorY : Math.max(heightAt(x, z), rockHeightAt(x, z), farms ? farms.platformAt(x, z) : -Infinity); }
+// Marken under fötterna. y = var man är i höjd (i slottet finns flera våningar ovanpå varandra)
+function groundAt(x, z, y = P.y) {
+  const b = barnAt(x, z);
+  if (b) return b.floorY;
+  let g = Math.max(heightAt(x, z), rockHeightAt(x, z), farms ? farms.platformAt(x, z) : -Infinity);
+  if (farms && farms.castle) g = Math.max(g, farms.castle.groundAt(x, z, y));
+  return g;
+}
 let nearBarn = null;
 let nearChest = null;
 function useDoor() { if (nearChest) openChest(nearChest); else if (holdAct) return; else if (nearBarn) nearBarn.toggle(); }
@@ -448,26 +458,8 @@ const clock = new THREE.Clock();
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
 let wasMoving = false;
 
-/* ---------- Speltid: 2 minuter, sen tillbaka till menyn (allt är redan sparat) ---------- */
-const GAME_TIME = 120;
-let timeLeft = null, timeUp = false;
-function tickTimer(dt) {
-  if (timeLeft === null || timeUp) return;
-  timeLeft = Math.max(0, timeLeft - dt);
-  const s = Math.ceil(timeLeft);
-  $('timer').textContent = `⏱️ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  $('timer').classList.toggle('low', s <= 10);
-  if (timeLeft <= 0) {
-    timeUp = true;
-    for (const k in keys) keys[k] = false;
-    if (document.pointerLockElement) document.exitPointerLock?.();
-    $('timeUp').classList.add('show');
-    setTimeout(() => { location.href = 'index.html'; }, 3500);
-  }
-}
+/* Ingen speltid: man spelar så länge man vill (allt sparas hela tiden). */
 function update(dt) {
-  tickTimer(dt);
-  if (timeUp) dt = 0.0001;       // gubben står still när tiden är slut
   // Riktning från tangentbord eller joystick (i förhållande till kameran)
   let ix = 0, iz = 0;
   const followCam = !dragging && stick.id === null;          // kameran följer gubbens ansikte
@@ -523,9 +515,11 @@ function update(dt) {
 
   // Hopp och mark (inne i en lada går man på trägolvet)
   const ground = groundAt(P.x, P.z);
+  const ceil = farms && farms.castle ? farms.castle.ceilingAt(P.x, P.z, P.y) : Infinity;
   if (!P.grounded) {
     P.vy += GRAVITY * dt;
     P.y += P.vy * dt;
+    if (P.y + 1.75 > ceil) { P.y = Math.max(ground, ceil - 1.75); if (P.vy > 0) P.vy = 0; }   // slår i taket
     if (P.y <= ground && P.vy <= 0) { P.y = ground; P.vy = 0; P.grounded = true; if (ch) ch.play(moving ? 'run' : 'idle', 0.15); }
     else if (P.y < ground) P.y = ground;           // uppåt i en backe: följ marken, men fortsätt hoppet
   } else if (ground < P.y - 0.6) {
@@ -552,7 +546,9 @@ function update(dt) {
   // Dra in kameran om något (vägg, sten) är i vägen
   let d = dist;
   const inBarn = barnAt(P.x, P.z);
+  const room = farms && farms.castle ? farms.castle.roomAt(P.x, P.z, P.y) : null;   // inne i slottet
   if (inBarn) d = Math.min(d, 4.2);
+  if (room) d = Math.min(d, 4.6);
   const sx = Math.sin(yaw) * Math.cos(pitch), sz = Math.cos(yaw) * Math.cos(pitch), sy = Math.sin(pitch);
   const camCols = world.near(camTarget.x + sx * d * 0.5, camTarget.z + sz * d * 0.5, d * 0.5 + 1);
   for (let st = 0.6; st <= d; st += 0.35) {
@@ -560,6 +556,7 @@ function update(dt) {
     let hit = false;
     for (const c of camCols) {
       if (!c.top || c.active === false || ty >= c.top + 0.3) continue;
+      if (c.bottom !== undefined && ty < c.bottom - 0.3) continue;
       if (c.box ? Math.abs(tx - c.x) < c.hw + 0.25 && Math.abs(tz - c.z) < c.hd + 0.25
                 : (tx - c.x) ** 2 + (tz - c.z) ** 2 < (c.r + 0.4) ** 2) { hit = true; break; }
     }
@@ -569,7 +566,17 @@ function update(dt) {
   const cz = camTarget.z + Math.cos(yaw) * Math.cos(pitch) * d;
   let cy = camTarget.y + Math.sin(pitch) * d;
   cy = Math.max(cy, Math.max(heightAt(cx, cz), rockHeightAt(cx, cz)) + 0.6);
-  let ccx = cx, ccz = cz;
+  if (farms && farms.castle) cy = Math.max(cy, farms.castle.groundAt(cx, cz, P.y + 1.2) + 0.5);
+  let ccx = cx, ccz = cz, firstPerson = false;
+  if (room) {     // i slottet: kameran stannar i rummet, under taket – och en lykta lyser upp runt gubben
+    const m = 0.5;
+    ccx = Math.min(room.maxX - m, Math.max(room.minX + m, cx));
+    ccz = Math.min(room.maxZ - m, Math.max(room.minZ + m, cz));
+    // trångt (t.ex. ryggen mot väggen i tornet): titta med gubbens ögon i stället för att hamna i nacken
+    if (Math.hypot(ccx - P.x, ccz - P.z) < 1.3) { firstPerson = true; ccx = P.x; ccz = P.z; cy = P.y + 1.55; }
+    cy = Math.max(room.floor + 0.6, Math.min(cy, room.ceil - 0.35));
+    barnLight.position.set(P.x, room.ceil - 0.5, P.z);
+  }
   if (inBarn) {   // inne i ladan: kameran stannar innanför väggarna och under taket
     const m = 0.5, I = inBarn.inner;
     ccx = Math.min(I.maxX - m, Math.max(I.minX + m, cx));
@@ -577,9 +584,13 @@ function update(dt) {
     cy = Math.min(cy, inBarn.roof);
     barnLight.position.set((I.minX + I.maxX) / 2, inBarn.roof + 0.05, (I.minZ + I.maxZ) / 2);
   }
-  barnLight.intensity += ((inBarn ? 30 : 0) - barnLight.intensity) * Math.min(1, dt * 8);
-  camera.position.lerp(new THREE.Vector3(ccx, cy, ccz), Math.min(1, dt * (inBarn ? 6 : 14)));
-  camera.lookAt(camTarget);
+  barnLight.distance = room ? 22 : 14;
+  barnLight.intensity += ((inBarn ? 30 : room ? 55 : 0) - barnLight.intensity) * Math.min(1, dt * 8);
+  camera.position.lerp(new THREE.Vector3(ccx, cy, ccz), Math.min(1, dt * (inBarn || room ? 6 : 14)));
+  if (firstPerson) camera.lookAt(camera.position.x - sx * 5, camera.position.y - sy * 5, camera.position.z - sz * 5);
+  else camera.lookAt(camTarget);
+  // Kameran alldeles intill huvudet: göm gubben så man ser rummet
+  if (ch) ch.root.visible = camera.position.distanceToSquared(camTarget) > 0.8;
 
   // Solens skuggor följer spelaren
   world.sun.position.set(P.x + 60, P.y + 90, P.z + 40);
@@ -622,7 +633,7 @@ function update(dt) {
   if (!holdAct || !act || (holdAct.tr || holdAct.d) !== actTarget) holdT = 0;
   holdAct = act;
   const holding = keys.KeyE || keys.Enter || keys.NumpadEnter || promptHeld;
-  const working = act && holding && !timeUp;
+  const working = act && holding;
   if (ch && ch.setWork) ch.setWork(working ? (act.kind === 'tree' ? 'hugga' : 'grava') : null);
   if (working) {
     holdT += dt;
@@ -675,7 +686,8 @@ function update(dt) {
     pr.querySelector('.bar u').style.width = Math.min(100, holdT / holdAct.time * 100) + '%';
     pr.classList.add('show');
   } else if (nearBarn) {
-    pr.querySelector('span').textContent = nearBarn.open ? 'stänga dörren' : 'öppna dörren';
+    const w = nearBarn.kind === 'castle' ? 'porten' : 'dörren';
+    pr.querySelector('span').textContent = (nearBarn.open ? 'stänga ' : 'öppna ') + w;
     pr.querySelector('b').textContent = '🚪'; pr.querySelector('i').textContent = 'Tryck';
     pr.classList.add('show');
   } else pr.classList.remove('show');
@@ -715,4 +727,4 @@ function loop() {
 loop();
 
 // För test: Jakt.teleport(x, z)
-window.Jakt = { renderer, scene, camera, get animals() { return animals; }, P, chests, digs, openChest, world, get ch() { return ch; }, set timeLeft(v) { timeLeft = v; }, get timeLeft() { return timeLeft; }, step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { update(dt); if (farms) farms.update(0, dt); } }, get farms() { return farms; }, get cam() { return camera.position.toArray(); }, teleport(x, z) { P.x = x; P.z = z; P.y = groundAt(x, z); P.vy = 0; P.grounded = true; }, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, set pitch(v) { pitch = v; }, set dist(v) { dist = v; }, keys };
+window.Jakt = { renderer, scene, camera, get animals() { return animals; }, P, chests, digs, openChest, world, get ch() { return ch; }, step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { update(dt); if (farms) farms.update(0, dt); } }, get farms() { return farms; }, get cam() { return camera.position.toArray(); }, teleport(x, z) { P.x = x; P.z = z; P.y = groundAt(x, z); P.vy = 0; P.grounded = true; }, get yaw() { return yaw; }, set yaw(v) { yaw = v; }, set pitch(v) { pitch = v; }, set dist(v) { dist = v; }, keys };
