@@ -189,7 +189,7 @@
     { id: 'yxa', ic: '🪓', label: 'Yxa', key: 2, tip: 'En stark yxa att ha i handen.' },
     { id: 'fjader', ic: '🪶', label: 'Fjäder', key: 3, tip: 'Du hoppar dubbelt så högt!' },
     { id: 'inlines', ic: '🛼', label: 'Inlines', key: 4, tip: 'Du springer dubbelt så snabbt!' },
-    { id: 'spo', ic: '🎣', label: 'Fiskespö', key: 5, price: 500, tip: 'Ta med fiskespöt till sjöarna!' }
+    { id: 'spo', ic: '🎣', label: 'Fiskespö', key: 5, price: 500, tip: 'Bär fiskespöt med dig på äventyret!' }
   ];
 
   /* ---------- Ljud ---------- */

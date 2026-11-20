@@ -1,6 +1,6 @@
 /* =========================================================
    Guldmyntsjakten – kartan
-   270 x 270 meter med kullar, sjöar, gräs, träd, stenar,
+   270 x 270 meter med kullar, gräsängar, träd, stenar,
    kristaller, en bergsring runt kanten och rymdhimmel.
    ========================================================= */
 import * as THREE from 'three';
@@ -10,7 +10,7 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
 export const HALF = 135;              // kartan går från -135 till +135 meter
 export const PLAY = HALF - 14;        // så långt man kan springa
-export const WATER = -2.2;            // vattennivå
+export const WATER = -2.2;            // gammal vattennivå (inga sjöar längre – används bara som referenshöjd)
 const SEG = 180;                      // rutnät för terrängen (1,5 m per ruta)
 const STEP = (HALF * 2) / SEG;
 
@@ -177,9 +177,16 @@ export const FARMS = [];
   }
 }
 
+/* Inga sjöar: alla gropar fylls upp till mjuka, lite gungande gräsängar */
+const MEADOW = -0.6;
+function fillLakes(x, z, h) {
+  const fl = MEADOW + fbm(x * 0.05 + 7, z * 0.05 - 3, 2) * 0.8;
+  const k = 2.5, d = Math.max(k - Math.abs(h - fl), 0) / k;      // mjukt maximum (ingen kant mot ängen)
+  return Math.max(h, fl) + d * d * k / 4;
+}
 /* Höjd med utplanade gårdar */
 function rawHeight(x, z) {
-  let h = baseHeight(x, z);
+  let h = fillLakes(x, z, baseHeight(x, z));
   for (const f of FARMS) {
     const d = Math.hypot(x - f.x, z - f.z);
     if (d < f.pad + 14) h += (f.h - h) * (1 - sstep(f.pad, f.pad + 14, d));
@@ -248,7 +255,6 @@ function groundColor(x, z, h, slope, out) {
   const g1 = C('#56b847'), g2 = C('#3f9a3c'), g3 = C('#86d35a');
   out.copy(g1).lerp(n > 0.5 ? g3 : g2, Math.abs(n - 0.5) * 1.6);
   out.lerp(C('#2f7d3a'), sstep(0.2, -0.6, h / 6) * 0.5);                      // mörkare i dalar
-  if (h < WATER + 0.7) out.lerp(C('#e6d39a'), sstep(WATER + 0.7, WATER + 0.1, h));   // sand vid vatten
   if (slope > 0.6) out.lerp(C('#8a7f9e'), sstep(0.6, 1.2, slope));            // sten i branter
   if (h > 16) out.lerp(C('#9a90b5'), sstep(16, 28, h));                       // berg
   if (h > 30) out.lerp(C('#f2f0ff'), sstep(30, 38, h));                       // snötoppar
@@ -368,12 +374,6 @@ export function buildWorld(scene, { lowSpec = false } = {}) {
   const terrain = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true }));
   terrain.receiveShadow = true;
   scene.add(terrain);
-
-  /* ---------- Vatten ---------- */
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, HALF * 2), new THREE.MeshStandardMaterial({ color: '#3ec7ff', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.72 }));
-  water.rotation.x = -Math.PI / 2;
-  water.position.y = WATER;
-  scene.add(water);
 
   /* ---------- Bergsring längre bort ---------- */
   {
@@ -656,7 +656,6 @@ export function buildWorld(scene, { lowSpec = false } = {}) {
       for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
         const x = -HALF + (px / size) * HALF * 2, z = -HALF + (py / size) * HALF * 2, h = heightAt(x, z);
         groundColor(x, z, h, slopeAt(x, z), c);
-        if (h < WATER) c.set('#3ec7ff');
         const sh = 0.85 + Math.max(-0.15, Math.min(0.2, (heightAt(x - 1, z - 1) - h) * -0.15));
         const o = (py * size + px) * 4;
         img.data[o] = c.r * 255 * sh; img.data[o + 1] = c.g * 255 * sh; img.data[o + 2] = c.b * 255 * sh; img.data[o + 3] = 255;
