@@ -220,14 +220,6 @@
   const chime = () => { tone(784, .12, 'sine', .07); tone(1047, .18, 'sine', .06, .08); };
   const fanfare = () => [523, 659, 784, 1047].forEach((f, i) => tone(f, .22, 'triangle', .08, i * .1));
   const pop = () => tone(660 + Math.random() * 200, .1, 'sine', .06);
-  // Läser upp vad man tryckt på (svensk röst), så att den som inte kan läsa ändå vet vad den valt
-  let svVoice = null;
-  const pickVoice = () => { try { svVoice = speechSynthesis.getVoices().find(v => /^sv/i.test(v.lang)) || null; } catch (e) {} };
-  try { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; } catch (e) {}
-  function speak(t) {
-    if (!data.settings.sound || !t || !window.speechSynthesis) return;
-    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = 'sv-SE'; if (svVoice) u.voice = svVoice; u.rate = 0.95; u.pitch = 1.15; speechSynthesis.speak(u); } catch (e) {}
-  }
 
   const soundBtn = $('sound');
   const paintSound = () => soundBtn.textContent = data.settings.sound ? '🔊' : '🔇';
@@ -553,7 +545,7 @@
       b.className = 'tab' + (t.id === tab ? ' on' : '');
       b.innerHTML = `<span>${t.ic}</span><small>${t.label}</small>`;
       b.onclick = () => {
-        tab = t.id; tone(700, .08, 'sine', .05); speak(t.label);
+        tab = t.id; tone(700, .08, 'sine', .05);
         if (tab !== 'prylar' && gearShown) { gearShown = null; stage && stage.showGear && stage.showGear(null); }
         renderTabs(); renderOpts(); $('opts').scrollTop = 0; stage && stage.focus(t.focus);
       };
@@ -643,7 +635,6 @@
       b.innerHTML = (pv ? `<span class="pv" style="background:${pv}">${['enfargad', 'randig', 'prickig', 'rutig', 'schack', 'regnbage', 'zebra', 'batik'].includes(o.id) ? '' : o.ic}</span>` : `<span class="ic">${o.ic}</span>`) + `<span class="lb">${o.label}</span>` +
         (o.soon ? '<span class="tag soonTag">Kommer snart</span>' : !owned ? `<span class="tag">🔒 100 🪙</span>` : '');
       b.onclick = () => {
-        speak(o.label);
         if (!owned) return openShop(key, o);
         // festklänningar får sina egna färger när man väljer dem (går att byta efteråt)
         if (o.color && draft.look[key] !== o.id) { draft.look.topColor = o.color; if (o.color2) draft.look.topColor2 = o.color2; }
@@ -653,7 +644,7 @@
     });
     return g;
   }
-  /* Färgnamn som läses upp när man trycker (för den som inte kan läsa än) */
+  /* Färgnamn (visas för skärmläsare) */
   const COLOR_NAMES = {
     '#ff5ccf': 'Rosa', '#3ee8ff': 'Turkos', '#8dff5a': 'Ljusgrön', '#ffd84a': 'Gul', '#ff7a3d': 'Orange', '#8a5cff': 'Lila',
     '#e23b4e': 'Röd', '#2f6db5': 'Blå', '#ffffff': 'Vit', '#2a2f45': 'Svart',
@@ -669,7 +660,7 @@
       b.style.background = c;
       b.style.setProperty('--ck', lumHex(c) > 0.6 ? '#2a1f6b' : '#fff');
       b.setAttribute('aria-label', COLOR_NAMES[c] || c);
-      b.onclick = () => { speak(key === 'eyes' && COLOR_NAMES[c] ? COLOR_NAMES[c] + ' ögon' : COLOR_NAMES[c]); setLook(key, c); };
+      b.onclick = () => setLook(key, c);
       g.appendChild(b);
     });
     return g;
@@ -712,7 +703,7 @@
         g.querySelectorAll('.style').forEach((b, i) => {
           const gg = i === 0 ? 'tjej' : 'kille';
           b.classList.toggle('on', draft.gender === gg);
-          b.onclick = () => { draft.gender = gg; speak(gg === 'tjej' ? 'Tjej' : 'Kille'); pop(); refresh(); renderOpts(); };
+          b.onclick = () => { draft.gender = gg; pop(); refresh(); renderOpts(); };
         });
         o.append(g);
       });
@@ -772,7 +763,7 @@
       b.className = 'chip' + (sec === cur ? ' on' : '');
       // färgdelar visar den valda färgen som en rund prick i stället för en ikon
       b.innerHTML = (sec.color ? `<i class="dot" style="background:${sec.color}"></i>` : `<span class="ci">${sec.ic}</span>`) + `<span class="cl">${sec.label}</span>`;
-      b.onclick = () => { secSel[tab] = sec.id; speak(sec.label); tone(760, .08, 'sine', .05); renderOpts(); $('opts').scrollTop = 0; };
+      b.onclick = () => { secSel[tab] = sec.id; tone(760, .08, 'sine', .05); renderOpts(); $('opts').scrollTop = 0; };
       chips.appendChild(b);
     });
     if (preset && !['drakt', 'hatt'].includes(tab)) o.append(note('🦸 Du har en färdig dräkt på dig. Väljer du något här byter du till din egen design.'));
@@ -793,7 +784,7 @@
       b.onclick = () => {
         gearShown = gearShown === it.id ? null : it.id;     // visa prylen på gubben
         stage && stage.showGear && stage.showGear(gearShown);
-        speak(it.label); pop(); renderOpts();
+        pop(); renderOpts();
         if (!owned) openShop('gear', it);
       };
       g.appendChild(b);
