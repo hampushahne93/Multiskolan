@@ -999,6 +999,9 @@ function paintShoes(ctx, look) {
       laces('#ffffff');
       for (let x = 670; x < 1000; x += 40) for (const y of [40, 90]) ellipse(ctx, x, y, 8, 8, '#d8d8e8');
       break;
+    case 'barfota':                                    // inga skor (Tower hunt börjar barfota)
+      ctx.fillStyle = sk; ctx.fillRect(...SH); sole(shade(sk, -0.1));
+      break;
     case 'foppa':
       sole(shade(c, -0.2));
       for (const t of tops) for (let r = 0; r < 3; r++) for (let i = 0; i < 4; i++) ellipse(ctx, 690 + i * 24 + (r % 2) * 12, t + 90 + r * 30, 6, 6, shade(c, -0.3));
