@@ -119,5 +119,31 @@
     return true;
   }
 
-  window.Save = { load, save, update, KEY, players, get, active, addPlayer, updatePlayer, removePlayer, setActive, addCoins, owns, buy };
+  /* ---------- Flytta sparningen (t.ex. från Safari till hemskärmsappen på iPhone) ---------- */
+  function exportCode() {
+    const json = JSON.stringify(load());
+    return 'MULTISKOLAN:' + btoa(unescape(encodeURIComponent(json)));
+  }
+  // Lägger till gubbarna från koden. Finns samma gubbe redan ersätts den. Returnerar antal hämtade gubbar.
+  function importCode(code) {
+    const i = (code || '').indexOf('MULTISKOLAN:');
+    if (i < 0) return 0;
+    let data;
+    try { data = JSON.parse(decodeURIComponent(escape(atob(code.slice(i + 12).replace(/\s+/g, ''))))); } catch (e) { return 0; }
+    if (!isObj(data)) return 0;
+    data = migrate(merge(defaults(), data), null);
+    if (!data.players.length) return 0;
+    try { const raw = localStorage.getItem(KEY); if (raw) localStorage.setItem(KEY + '-backup-' + Date.now(), raw); } catch (e) {}
+    update(d => {
+      for (const p of data.players) {
+        const j = d.players.findIndex(q => q.id === p.id);
+        if (j >= 0) d.players[j] = p; else d.players.push(p);
+      }
+      if (!d.activeId || !d.players.some(p => p.id === d.activeId)) d.activeId = data.activeId && d.players.some(p => p.id === data.activeId) ? data.activeId : d.players[0].id;
+      if (isObj(data.settings)) d.settings = merge(d.settings || {}, data.settings);
+    });
+    return data.players.length;
+  }
+
+  window.Save = { load, save, update, KEY, players, get, active, addPlayer, updatePlayer, removePlayer, setActive, addCoins, owns, buy, exportCode, importCode };
 })();

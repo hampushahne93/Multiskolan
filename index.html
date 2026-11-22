@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Multiskolan">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#1c1259">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <title>Multiskolan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
@@ -158,6 +166,9 @@
     border:3px solid #fff;background:rgba(255,255,255,.12);color:#fff;font-size:26px;cursor:pointer;
     box-shadow:0 0 18px rgba(255,255,255,.25);transition:transform .2s}
   .sound:hover{transform:scale(1.1)}
+  .sound.fsMenu{right:88px;padding:0}
+  .sound.fsMenu svg{width:28px;height:28px}
+  body.onboarding .sound.fsMenu{display:none}
   body.onboarding.designing .sound{top:18px;bottom:auto;right:auto;left:calc(100% - min(560px,48vw) - 76px)}
 
   /* ---------- "Snart klart"-ruta ---------- */
@@ -637,6 +648,7 @@
 <div class="toast" id="toast"></div>
 
 <button class="sound" id="sound" aria-label="Ljud på/av">🔊</button>
+<div data-fs-slot data-fs-class="sound fsMenu"></div>
 
 <div class="overlay" id="overlay">
   <div class="panel" id="panel">
@@ -648,6 +660,7 @@
 </div>
 
 <script src="js/save.js"></script>
+<script src="js/fullscreen.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

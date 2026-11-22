@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Multiskolan">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#1c1259">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <title>Multiskolan – skriv</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
@@ -134,12 +141,19 @@
     .pill{height:46px;font-size:20px}.who img{width:46px;height:46px}
     .btn{min-height:58px}
   }
+  /* mobil: rubriken och namnet får ge plats åt knapparna i toppraden */
+  @media (max-width:600px), (max-height:500px){
+    .top h1, .who span{display:none}
+    .top .streak{margin-left:auto}
+    .pill{height:44px;font-size:18px;padding:0 12px;white-space:nowrap}
+    .who img{width:44px;height:44px}
+  }
 </style>
 </head>
 <body>
 <canvas id="stars"></canvas>
 <div class="app">
-  <header class="top">
+  <header class="top" data-fs-slot data-fs-class="pill fsPill">
     <button class="pill quit" id="quit">✕ Avsluta</button>
     <div class="who"><img id="face" alt=""><span id="name"></span></div>
     <h1 id="title">ABC Skolan</h1>
@@ -166,6 +180,7 @@
   </div>
 </div>
 <script src="js/save.js"></script>
+<script src="js/fullscreen.js"></script>
 <script type="module" src="js/skola.js"></script>
 </body>
 </html>

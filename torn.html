@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Multiskolan">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#1c1259">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <title>Tower hunt – Multiskolan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
@@ -97,11 +104,13 @@
   #flash{position:fixed;inset:0;z-index:8;background:#fff;opacity:0;pointer-events:none;transition:opacity .35s}
   #flash.on{opacity:.8;transition:none}
   @media (max-width:700px){ .title{display:none} .pill{font-size:15px;padding:5px 10px} #hNow{font-size:22px;min-width:90px} }
+  @media (max-height:500px){ .title{display:none} }
+  .hud.top{flex-wrap:wrap;max-width:calc(100vw - 150px)}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div class="hud top">
+<div class="hud top" data-fs-slot data-fs-class="pill">
   <a class="pill back" href="index.html" id="backBtn">◀ Meny</a>
   <span class="pill" id="pname">…</span>
   <span class="pill coins" id="pcoins">🪙 0</span>
@@ -110,7 +119,7 @@
 <div id="meter"><div id="hNow">0 <small>m</small></div><div id="bar"><span class="crown">👑</span><div class="fill"></div><div class="me">🙂</div></div></div>
 <div id="toast"></div>
 <div id="help">
-  <div class="grp goal">🗼 Klättra våning för våning upp till taket! På varje ny våning väljer du ett plagg i en portal. 🫧 Hoppa på bubblorna!</div>
+  <div class="grp goal">🗼 Klättra våning för våning upp till taket! På varje ny våning väljer du ett plagg i en portal. 🫧 Landa på bubblorna och hoppa vidare – de studsar extra högt!</div>
   <div class="grp keys"><div><kbd>W</kbd></div><div><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div><small>Spring · A/D svänger</small></div>
   <div class="grp keys"><div><kbd style="min-width:90px">Mellanslag</kbd></div><small>Hoppa · tryck igen i luften = bubbelhopp</small></div>
   <div class="grp keys"><div>🖱️</div><small>Håll höger knapp: titta runt</small></div>
@@ -145,6 +154,7 @@
 </div>
 <div id="loading"><div><span class="tw">🗼</span>Bygger tornet…</div></div>
 <script src="js/save.js"></script>
+<script src="js/fullscreen.js"></script>
 <script type="module" src="js/torn.js"></script>
 </body>
 </html>

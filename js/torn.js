@@ -23,6 +23,7 @@ showCoins();
 const TOP = 1000, SECTION = 50, NPORT = 19;          // portaler på 50, 100 … 950 m, toppen på 1000 m
 const PATH_R = 11, WALL_R = 17;                    // banan går runt längs insidan av tornväggen
 const RUN = 6.2, WALK = 2.6, GRAVITY = -22, JUMP = 8.4;     // hopp ca 1,6 m högt
+const BUBBLE_JUMP = 10.2;                           // hopp från en studsbubbla: ca 2,4 m högt
 const AIR_JUMP = 7.6;                               // dubbelhoppet (bubblan) ger ca 1,3 m till
 const RAD = 0.32, HEIGHT = 1.6, STEP = 0.45, FOOT = 0.14;
 const AIR_MAX = 3.9;                                // fart i luften (lagom långa hopp, lätt att landa på små plattor)
@@ -106,6 +107,7 @@ const sPortal = () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.28
 const sCoin = () => [1319, 1760, 2093].forEach((f, i) => tone(f, 0.16, 'square', 0.035, 0.3 + i * 0.07));
 const sFall = () => tone(600, 0.6, 'sine', 0.06, 0, 0.3);
 const sGum = () => { tone(300, 0.12, 'sine', 0.08, 0, 2.2); tone(1400, 0.06, 'square', 0.03, 0.18); };      // blås + plopp
+const sSquish = () => tone(520, 0.12, 'sine', 0.05, 0, 0.6);
 const sPop = () => { tone(1200, 0.07, 'square', 0.04); tone(220, 0.3, 'sine', 0.1, 0.02, 3.5); };
 
 /* ---------- Renderare och scen ---------- */
@@ -337,11 +339,11 @@ function pBelt(len, mode, speed) {
 /* Studsbubblor: man hoppar upp på den första, sedan studsar man från bubbla till bubbla (de smäller) */
 function pBubbles(dh) {
   curKind = 'bubbles';
-  const first = 1.0, n = Math.max(2, Math.min(5, Math.round((dh - first) / 2.8))), step = (dh - first) / n;
+  const first = 1.0, n = Math.max(3, Math.min(6, Math.round((dh - first) / 1.7))), step = (dh - first) / n;   // ≤ 1,85 m mellan bubblorna
   const list = [];
   let top = cur.y + first;
   for (let i = 0; i < n; i++) {
-    const d = dirAhead(i === 0 ? 2.6 : 3.4), p = along(d, i === 0 ? 2.6 : 3.4);
+    const d = dirAhead(i === 0 ? 2.6 : 3.0), p = along(d, i === 0 ? 2.6 : 3.0);
     const b = addBox({ x: p.x, y: top - 0.15, z: p.z, hx: 0.8, hy: 0.15, hz: 0.8, yaw: d.yaw });
     route.push({ b, kind: 'bubble' });
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex, color: ['#ffd1f0', '#d6f6ff', '#e9dcff', '#fff0c4'][i % 4], transparent: true, depthWrite: false }));
@@ -356,7 +358,6 @@ function pBubbles(dh) {
   const d = dirAhead(3.6), p = along(d, 3.6);
   curKind = 'bubbles';
   const land = platform(p.x, cur.y + step, p.z, 3.4, 3.4, d.yaw, T[0]);
-  list.forEach((b, i) => { const t = list[i + 1] || land; b.bounce = { x: t.x, y: t.top, z: t.z }; });
   cur.x = p.x + d.x * 1.7; cur.z = p.z + d.z * 1.7; cur.y += step;
   pLanding(2.4);
 }
@@ -778,7 +779,7 @@ function setCp(i, effect = true) {
 }
 function respawn() {
   const c = checkpoints[cpIdx];
-  P.x = c.x; P.z = c.z; P.y = c.y; P.vx = P.vz = P.vy = 0; P.grounded = true; P.on = null; P.launch = 0; P.airT = 0;
+  P.x = c.x; P.z = c.z; P.y = c.y; P.vx = P.vz = P.vy = 0; P.grounded = true; P.on = null; P.launch = 0; P.airT = 0; lastBubble = null;
   P.heading = c.heading; yaw = c.heading + Math.PI;
   const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
 }
@@ -853,9 +854,19 @@ function jump() {
   else jumpBuf = 0.15;                                                    // lite förlåtande: hoppet "sparas" en kort stund
 }
 function doJump() {
-  P.vy = JUMP; P.grounded = false; P.coyote = 0; P.on = null; jumpBuf = 0; P.airJumps = 1;
+  const from = P.on || (P.coyote > 0 ? P.coyoteOn : null);
+  const bub = from && from.bubble && !from.ghost ? from.bubble : null;
+  P.vy = bub ? BUBBLE_JUMP : JUMP; P.grounded = false; P.coyote = 0; P.on = null; jumpBuf = 0; P.airJumps = 1;
   if (ch) ch.play('jump', 0.08);
-  sJump();
+  if (bub) { bub.squash = 1; sBoing(); } else sJump();
+}
+/* Studsbubblor: man landar och står på dem, hoppar själv (extra högt).
+   Bubblan man hoppade ifrån smäller när man landar någon annanstans – och kommer tillbaka efter en stund. */
+let lastBubble = null;
+function popBubble(b) {
+  const u = b.bubble; if (!u || b.ghost) return;
+  u.popT = 2.6; b.ghost = true; u.spr.visible = false; u.squash = 0;
+  sparkle(u.x, u.y + 0.3, u.z, 12, '#ffc4ec'); sPop();
 }
 function airJump() {
   P.airJumps = 0; P.vy = AIR_JUMP; P.launch = 0; jumpBuf = 0;
@@ -885,7 +896,10 @@ function update(dt) {
   for (const u of bubbles) {
     if (u.popT > 0) { u.popT -= dt; if (u.popT <= 0) { u.b.ghost = false; u.spr.visible = true; u.grow = 0; } continue; }
     if (u.grow !== undefined && u.grow < 1) u.grow = Math.min(1, u.grow + dt * 3);
-    u.spr.scale.setScalar(2.2 * (u.grow === undefined ? 1 : 0.3 + 0.7 * u.grow) + Math.sin(time * 2.4 + u.ph) * 0.07);
+    const base = 2.2 * (u.grow === undefined ? 1 : 0.3 + 0.7 * u.grow) + Math.sin(time * 2.4 + u.ph) * 0.07;
+    const q = u.squash || 0, w = q * Math.cos((1 - q) * 14) * 0.22;           // gungar som gelé
+    u.spr.scale.set(base * (1 + w), base * (1 - w), 1);
+    if (q > 0) u.squash = Math.max(0, q - dt * 1.6);
   }
   if (!started || finished) { animate(dt, false); return; }
 
@@ -937,7 +951,7 @@ function update(dt) {
   if (P.grounded) {
     const s = supportAt(P.x, P.z, P.y - 0.3, P.y + STEP);
     if (s) { P.y = s.top; P.on = s; P.airT = 0; }
-    else { P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; P.airJumps = 1; if (ch) ch.play('jump', 0.2); }
+    else { P.coyoteOn = P.on; P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; P.airJumps = 1; if (ch) ch.play('jump', 0.2); }
   }
   if (!P.grounded) {
     P.coyote = Math.max(0, P.coyote - dt);
@@ -996,16 +1010,11 @@ function update(dt) {
   animate(dt, moving, walking);
 }
 function land(s) {
+  const vyIn = P.vy;
   P.grounded = true; P.on = s; P.vy = 0; P.coyote = 0;
-  if (s.bounce) {                                           // studsbubbla: smäller och skjuter upp en till nästa
-    const t = s.bounce, apex = Math.max(1, t.y - s.top) + 1.6;
-    const vy = Math.sqrt(2 * -GRAVITY * apex), tt = vy / -GRAVITY + Math.sqrt(2 * 1.6 / -GRAVITY);
-    P.vy = vy; P.vx = (t.x - P.x) / tt; P.vz = (t.z - P.z) / tt; P.launch = tt; P.grounded = false; P.on = null; P.airJumps = 1;
-    P.heading = Math.atan2(t.x - P.x, t.z - P.z);
-    if (ch) ch.play('jump', 0.05);
-    const u = s.bubble; if (u) { u.popT = 2.6; s.ghost = true; u.spr.visible = false; sparkle(u.x, u.y + 0.3, u.z, 12, '#ffc4ec'); }
-    sPop(); sBoing(); return;
-  }
+  if (lastBubble && lastBubble !== s) popBubble(lastBubble);
+  lastBubble = s.bubble ? s : null;
+  if (s.bubble) { s.bubble.squash = Math.min(1, 0.4 - vyIn * 0.06); sSquish(); }
   if (ch) ch.play(Math.hypot(P.vx, P.vz) > 0.5 ? 'run' : 'idle', 0.12);
   if (jumpBuf > 0) doJump();
 }
