@@ -348,7 +348,19 @@ function turn(dx, dy) {
 const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
 let lookId = null;
 if (touch) document.body.classList.add('touch');
+function releaseStick() { stick.id = null; stick.x = stick.y = 0; $('joy').classList.remove('show'); $('knob').style.transform = ''; }
+// släpp spaken om fingret inte längre ligger på skärmen (t.ex. när helskärmen slås på)
+function syncTouches(e) {
+  const ids = new Set(); for (const t of e.touches) ids.add(t.identifier);
+  if (stick.id !== null && !ids.has(stick.id)) releaseStick();
+  if (lookId !== null && !ids.has(lookId)) lookId = null;
+}
+document.addEventListener('touchend', syncTouches, true);
+document.addEventListener('touchcancel', syncTouches, true);
+for (const ev of ['blur', 'pagehide']) addEventListener(ev, () => { releaseStick(); lookId = null; });
+for (const ev of ['visibilitychange', 'fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { releaseStick(); lookId = null; });
 canvas.addEventListener('touchstart', e => {
+  syncTouches(e);
   for (const t of e.changedTouches) {
     if (t.clientX < innerWidth * 0.45 && stick.id === null) {
       stick.id = t.identifier; stick.ox = t.clientX; stick.oy = t.clientY; stick.x = stick.y = 0;
@@ -373,7 +385,7 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: false });
 const endTouch = e => {
   for (const t of e.changedTouches) {
-    if (t.identifier === stick.id) { stick.id = null; stick.x = stick.y = 0; $('joy').classList.remove('show'); $('knob').style.transform = ''; }
+    if (t.identifier === stick.id) releaseStick();
     if (t.identifier === lookId) lookId = null;
   }
 };
@@ -442,7 +454,7 @@ function jump() {
   if (!ch || !P.grounded) return;
   P.y = Math.max(P.y, groundAt(P.x, P.z));
   P.vy = JUMP * (gearOn.has('fjader') ? Math.SQRT2 : 1); P.grounded = false;   // fjädern: dubbelt så högt
-  ch.play('jump', 0.08);
+  anim = 'jump'; ch.play('jump', 0.08);
 }
 
 /* ---------- Hjälpruta ---------- */
@@ -456,7 +468,8 @@ $('helpBtn').addEventListener('click', () => $('help').classList.toggle('show'))
 /* ---------- Spelloop ---------- */
 const clock = new THREE.Clock();
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
-let wasMoving = false;
+let anim = null, camY = null;
+function playAnim(name, fade) { if (!ch || anim === name) return; anim = name; ch.play(name, fade); }
 
 /* Ingen speltid: man spelar så länge man vill (allt sparas hela tiden). */
 function update(dt) {
@@ -520,7 +533,7 @@ function update(dt) {
     P.vy += GRAVITY * dt;
     P.y += P.vy * dt;
     if (P.y + 1.75 > ceil) { P.y = Math.max(ground, ceil - 1.75); if (P.vy > 0) P.vy = 0; }   // slår i taket
-    if (P.y <= ground && P.vy <= 0) { P.y = ground; P.vy = 0; P.grounded = true; if (ch) ch.play(moving ? 'run' : 'idle', 0.15); }
+    if (P.y <= ground && P.vy <= 0) { P.y = ground; P.vy = 0; P.grounded = true; playAnim(moving ? 'run' : 'idle', 0.15); }
     else if (P.y < ground) P.y = ground;           // uppåt i en backe: följ marken, men fortsätt hoppet
   } else if (ground < P.y - 0.6) {
     P.grounded = false; P.vy = 0;                  // gick över en kant – falla
@@ -530,19 +543,18 @@ function update(dt) {
 
   // Animationer
   if (ch) {
-    if (P.grounded) {
-      if (moving && !wasMoving) ch.play('run', 0.15);
-      if (!moving && wasMoving) ch.play('idle', 0.25);
-    }
+    if (P.grounded) playAnim(moving ? 'run' : 'idle', moving ? 0.15 : 0.25);   // efter vad man gör just nu
     ch.mixer.timeScale = moving && walking ? 0.55 : moving && gearOn.has('inlines') ? 1.35 : 1;
-    wasMoving = moving;
     ch.root.position.set(P.x, P.y + (gearOn.has('inlines') ? 0.07 : 0), P.z);
     ch.root.rotation.y = P.heading;
     ch.update(dt);
   }
 
   // Kamera
-  camTarget.set(P.x, P.y + 1.6, P.z);
+  // höjden följer mjukt så att trappsteg inte rycker i bilden
+  if (camY === null || Math.abs(P.y + 1.6 - camY) > 3) camY = P.y + 1.6;
+  else camY += (P.y + 1.6 - camY) * Math.min(1, dt * (P.grounded ? 10 : 6));
+  camTarget.set(P.x, camY, P.z);
   // Dra in kameran om något (vägg, sten) är i vägen
   let d = dist;
   const inBarn = barnAt(P.x, P.z);

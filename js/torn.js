@@ -658,13 +658,18 @@ const floaters = [];
 /* ---------- Gubben ---------- */
 const P = { x: 0, y: 0, z: 0, vx: 0, vz: 0, vy: 0, grounded: true, on: null, heading: 0, speed: 0, coyote: 0, launch: 0, airT: 0, airJumps: 1 };
 let ch = null, look = underwear(), buildId = 0;
+let anim = null, lastMoving = false;
+function playAnim(name, fade, restart = false) {
+  if (!ch || (anim === name && !restart)) return;
+  anim = name; ch.play(name, fade);
+}
 async function applyLook(next, puff = false) {
   const id = ++buildId;
   const c = await createCharacter(next, gender);
   if (id !== buildId) { c.dispose(); return; }
   if (ch) { scene.remove(ch.root); ch.dispose(); }
   ch = c; scene.add(c.root);
-  ch.play(P.grounded ? 'idle' : 'jump', 0);
+  anim = null; playAnim(P.grounded ? (lastMoving ? 'run' : 'idle') : 'jump', 0);   // nya kläder: fortsätt med samma rörelse
   if (puff) sparkle(P.x, P.y + 1, P.z, 18);
 }
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
@@ -780,12 +785,12 @@ function setCp(i, effect = true) {
 function respawn() {
   const c = checkpoints[cpIdx];
   P.x = c.x; P.z = c.z; P.y = c.y; P.vx = P.vz = P.vy = 0; P.grounded = true; P.on = null; P.launch = 0; P.airT = 0; lastBubble = null;
-  P.heading = c.heading; yaw = c.heading + Math.PI;
+  P.heading = c.heading; yaw = c.heading + Math.PI; camSnap = true; visY = P.y; playAnim('idle', 0);
   const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
 }
 
 /* ---------- Kamera och styrning (som i Guldmyntsjakten) ---------- */
-let yaw = Math.PI, pitch = 0.3, dist = 6.5;
+let yaw = Math.PI, pitch = 0.3, dist = 6.5, camSnap = true;
 const camTarget = new THREE.Vector3(), camPos = new THREE.Vector3();
 const keys = {};
 let started = false, finished = false;
@@ -814,7 +819,19 @@ function turn(dx, dy) { yaw -= dx * 0.0028; pitch = Math.min(1.2, Math.max(-0.2,
 const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
 let lookId = null;
 if (touch) document.body.classList.add('touch');
+function releaseStick() { stick.id = null; stick.x = stick.y = 0; $('joy').classList.remove('show'); $('knob').style.transform = ''; }
+// håller bara koll på fingrar som faktiskt ligger kvar på skärmen
+function syncTouches(e) {
+  const ids = new Set(); for (const t of e.touches) ids.add(t.identifier);
+  if (stick.id !== null && !ids.has(stick.id)) releaseStick();
+  if (lookId !== null && !ids.has(lookId)) lookId = null;
+}
+document.addEventListener('touchend', syncTouches, true);
+document.addEventListener('touchcancel', syncTouches, true);
+for (const ev of ['blur', 'pagehide']) addEventListener(ev, () => { releaseStick(); lookId = null; });
+for (const ev of ['visibilitychange', 'fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { releaseStick(); lookId = null; for (const k in keys) keys[k] = false; });
 canvas.addEventListener('touchstart', e => {
+  syncTouches(e);
   for (const t of e.changedTouches) {
     if (t.clientX < innerWidth * 0.45 && stick.id === null) {
       stick.id = t.identifier; stick.ox = t.clientX; stick.oy = t.clientY; stick.x = stick.y = 0;
@@ -838,7 +855,7 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: false });
 const endTouch = e => {
   for (const t of e.changedTouches) {
-    if (t.identifier === stick.id) { stick.id = null; stick.x = stick.y = 0; $('joy').classList.remove('show'); $('knob').style.transform = ''; }
+    if (t.identifier === stick.id) releaseStick();
     if (t.identifier === lookId) lookId = null;
   }
 };
@@ -857,7 +874,7 @@ function doJump() {
   const from = P.on || (P.coyote > 0 ? P.coyoteOn : null);
   const bub = from && from.bubble && !from.ghost ? from.bubble : null;
   P.vy = bub ? BUBBLE_JUMP : JUMP; P.grounded = false; P.coyote = 0; P.on = null; jumpBuf = 0; P.airJumps = 1;
-  if (ch) ch.play('jump', 0.08);
+  playAnim('jump', 0.08, true);
   if (bub) { bub.squash = 1; sBoing(); } else sJump();
 }
 /* Studsbubblor: man landar och står på dem, hoppar själv (extra högt).
@@ -870,7 +887,7 @@ function popBubble(b) {
 }
 function airJump() {
   P.airJumps = 0; P.vy = AIR_JUMP; P.launch = 0; jumpBuf = 0;
-  if (ch) ch.play('jump', 0.05);
+  playAnim('jump', 0.05, true);
   gumBubble(); sGum();
 }
 /* Bubbelgumsbubblan under fötterna vid dubbelhopp: blåses upp och smäller */
@@ -886,7 +903,7 @@ function gumBubble() { const s = new THREE.Sprite(gumMat); s.position.set(P.x, P
 
 /* ---------- Spelloop ---------- */
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
-let time = 0, wasMoving = false, lastPortalLz = new Map();
+let time = 0, lastPortalLz = new Map();
 function update(dt) {
   time += dt;
   // rörliga saker
@@ -949,9 +966,9 @@ function update(dt) {
   // Upp och ner
   P.launch = Math.max(0, P.launch - dt);
   if (P.grounded) {
-    const s = supportAt(P.x, P.z, P.y - 0.3, P.y + STEP);
+    const s = supportAt(P.x, P.z, P.y - 0.5, P.y + STEP);       // följer med ner för trappsteg
     if (s) { P.y = s.top; P.on = s; P.airT = 0; }
-    else { P.coyoteOn = P.on; P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; P.airJumps = 1; if (ch) ch.play('jump', 0.2); }
+    else { P.coyoteOn = P.on; P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; P.airJumps = 1; playAnim('jump', 0.2); }
   }
   if (!P.grounded) {
     P.coyote = Math.max(0, P.coyote - dt);
@@ -1015,18 +1032,17 @@ function land(s) {
   if (lastBubble && lastBubble !== s) popBubble(lastBubble);
   lastBubble = s.bubble ? s : null;
   if (s.bubble) { s.bubble.squash = Math.min(1, 0.4 - vyIn * 0.06); sSquish(); }
-  if (ch) ch.play(Math.hypot(P.vx, P.vz) > 0.5 ? 'run' : 'idle', 0.12);
-  if (jumpBuf > 0) doJump();
+  if (jumpBuf > 0) doJump();                                  // springa/stå väljs i animate() efter vad man gör
 }
+let visY = 0, camY = null, camD = 6.5;
 function animate(dt, moving, walking) {
+  lastMoving = !!moving;
   if (ch) {
-    if (P.grounded) {
-      if (moving && !wasMoving) ch.play('run', 0.15);
-      if (!moving && wasMoving) ch.play('idle', 0.25);
-    }
-    ch.mixer.timeScale = moving && walking ? 0.55 : 1;
-    wasMoving = moving && P.grounded;
-    ch.root.position.set(P.x, P.y, P.z);
+    if (P.grounded) playAnim(moving ? 'run' : 'idle', moving ? 0.15 : 0.25);
+    ch.mixer.timeScale = moving && walking && P.grounded ? 0.55 : 1;
+    // i trappor hoppar man upp ett trappsteg i taget: kroppen glider upp mjukt istället för att rycka
+    visY = P.grounded && Math.abs(P.y - visY) < 0.7 ? visY + (P.y - visY) * Math.min(1, dt * 22) : P.y;
+    ch.root.position.set(P.x, visY, P.z);
     ch.root.rotation.y = P.heading;
     ch.update(dt);
   }
@@ -1058,17 +1074,24 @@ function animate(dt, moving, walking) {
     f.pts.geometry.attributes.position.needsUpdate = true;
   }
   // Kamera bakom gubben, inte inne i tornet eller i plattformar
-  camTarget.set(P.x, P.y + 1.5, P.z);
+  // höjden följer mjukt (trappsteg och hopp rycker inte i bilden); stora hopp i höjd = direkt
+  if (camY === null || camSnap || Math.abs(P.y + 1.5 - camY) > 5) camY = P.y + 1.5;
+  else camY += (P.y + 1.5 - camY) * Math.min(1, dt * (P.grounded ? 9 : 5));
+  camTarget.set(P.x, camY, P.z);
   const sx = Math.sin(yaw) * Math.cos(pitch), sz = Math.cos(yaw) * Math.cos(pitch), sy = Math.sin(pitch);
   let d = dist;
-  for (let st = 0.8; st <= dist; st += 0.4) {
+  for (let st = 0.6; st <= dist; st += 0.2) {
     const x = camTarget.x + sx * st, y = camTarget.y + sy * st, z = camTarget.z + sz * st;
     let hit = Math.hypot(x, z) > WALL_R - 0.7 && y < TOP + 1;
-    if (!hit) for (const b of near(x, z, y - 0.5, y + 0.5)) { if (!b.ghost && y > b.bot - 0.25 && y < b.top + 0.25 && inside(b, x, z, 0.25)) { hit = true; break; } }
-    if (hit) { d = Math.max(1.2, st - 0.4); break; }
+    if (!hit) for (const b of near(x, z, y - 0.5, y + 0.5)) { if (!b.ghost && y > b.bot - 0.3 && y < b.top + 0.3 && inside(b, x, z, 0.3)) { hit = true; break; } }
+    if (hit) { d = Math.max(1.2, st - 0.3); break; }
   }
-  camPos.set(camTarget.x + sx * d, camTarget.y + sy * d, camTarget.z + sz * d);
-  camera.position.lerp(camPos, 1 - Math.exp(-dt * 12));
+  // något i vägen: kameran glider närmare snabbt, och backar ut lugnt igen (ingen "pumpande" kamera i trappor)
+  if (camSnap) camD = d;
+  else camD += (d - camD) * Math.min(1, dt * (d < camD ? 14 : 2.2));
+  camPos.set(camTarget.x + sx * camD, camTarget.y + sy * camD, camTarget.z + sz * camD);
+  if (camSnap) camera.position.copy(camPos); else camera.position.lerp(camPos, 1 - Math.exp(-dt * 12));
+  camSnap = false;
   camera.lookAt(camTarget);
   // himlen blir mörkare och stjärnorna kommer fram ju högre man är
   const h = Math.max(0, Math.min(1, P.y / TOP));
@@ -1190,5 +1213,5 @@ window.Torn = {
   P, checkpoints, portals, boxes, keys, route, dyn, bubbles, get look() { return look; }, get cp() { return cpIdx; }, get ch() { return ch; }, renderer, scene, camera,
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) update(dt); },
   get yaw() { return yaw; }, set yaw(v) { yaw = v; }, set pitch(v) { pitch = v; }, set dist(v) { dist = v; },
-  setCp(i) { cpIdx = i; respawn(); }, jump, choose, preparePortal, supportAt, get finished() { return finished; }
+  setCp(i) { cpIdx = i; respawn(); }, jump, choose, preparePortal, supportAt, get finished() { return finished; }, get anim() { return anim; }, get stick() { return stick; }, get camD() { return camD; }, get camY() { return camY; }, get visY() { return visY; }
 };
