@@ -1,9 +1,11 @@
 /* =========================================================
-   Tower hunt – en hinderbana 1000 m upp runt ett jättetorn.
-   Man börjar i underkläder längst ner. Var 50:e meter kommer en
-   portalvåning: man går igenom en av tre portaler och får det plagget.
-   Hinder: trappor, hopp mellan plattformar, smala balansgångar,
-   rullband, studsmattor, hissar, flyttande plattformar och snurrande bommar.
+   Tower hunt – ett bubbelgumstorn 1000 m högt, i stil med Bubble Jump Tower.
+   Man börjar i underkläder på bottenvåningen och klättrar våning för våning
+   (en våning = 50 m) inne i tornet. Överst på varje våning går man igenom
+   en av tre portaler och får det plagget. Man kan dubbelhoppa (en bubbla
+   blåses upp under fötterna) och studsa på svävande bubblor.
+   Hinder: trappor, hopp mellan plattformar, smala balansgångar, rullband,
+   studsbubblor, hissar, flyttande plattformar och snurrande bommar.
    ========================================================= */
 import * as THREE from 'three';
 import { createCharacter } from './avatar.js';
@@ -19,9 +21,9 @@ showCoins();
 
 /* ---------- Konstanter ---------- */
 const TOP = 1000, SECTION = 50, NPORT = 19;          // portaler på 50, 100 … 950 m, toppen på 1000 m
-const PATH_R = 19, PILLAR_R = 11;
-const pillarR = y => PILLAR_R + 1.5 * Math.max(0, 1 - y / 1000);   // tornet är lite bredare nertill
+const PATH_R = 11, WALL_R = 17;                    // banan går runt längs insidan av tornväggen
 const RUN = 6.2, WALK = 2.6, GRAVITY = -22, JUMP = 8.4;     // hopp ca 1,6 m högt
+const AIR_JUMP = 7.6;                               // dubbelhoppet (bubblan) ger ca 1,3 m till
 const RAD = 0.32, HEIGHT = 1.6, STEP = 0.45, FOOT = 0.14;
 const AIR_MAX = 3.9;                                // fart i luften (lagom långa hopp, lätt att landa på små plattor)
 const GOLD_PORTAL = 10, GOLD_TOP = 100;
@@ -103,6 +105,8 @@ const sCp = () => [660, 880, 1100].forEach((f, i) => tone(f, 0.18, 'triangle', 0
 const sPortal = () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.28, 'triangle', 0.09, i * 0.08));
 const sCoin = () => [1319, 1760, 2093].forEach((f, i) => tone(f, 0.16, 'square', 0.035, 0.3 + i * 0.07));
 const sFall = () => tone(600, 0.6, 'sine', 0.06, 0, 0.3);
+const sGum = () => { tone(300, 0.12, 'sine', 0.08, 0, 2.2); tone(1400, 0.06, 'square', 0.03, 0.18); };      // blås + plopp
+const sPop = () => { tone(1200, 0.07, 'square', 0.04); tone(220, 0.3, 'sine', 0.1, 0.02, 3.5); };
 
 /* ---------- Renderare och scen ---------- */
 const canvas = $('game');
@@ -112,10 +116,10 @@ let pixelRatio = MAX_PR;
 renderer.setPixelRatio(pixelRatio);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#8fd3ff');
-scene.fog = new THREE.Fog('#8fd3ff', 60, 300);
+scene.background = new THREE.Color('#bfe6ff');
+scene.fog = new THREE.Fog('#bfe6ff', 70, 320);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2200);
-const hemi = new THREE.HemisphereLight('#ffffff', '#6a7cff', 1.6);
+const hemi = new THREE.HemisphereLight('#ffffff', '#ffc4ec', 1.7);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff4dc', 2.2);
 scene.add(sun, sun.target);
@@ -164,12 +168,8 @@ function supportAt(x, z, yMin, yMax) {
     if (!inside(b, x, z, FOOT)) continue;
     best = b; by = b.top;
   }
-  // tornets tak (rund) och marken
-  if (Math.hypot(x, z) < PILLAR_R + FOOT && TOP <= yMax && TOP >= yMin && TOP > by) { best = PILLAR_TOP; by = TOP; }
-  if (0 <= yMax && 0 >= yMin && 0 > by && Math.hypot(x, z) < 230) { best = GROUND; by = 0; }
   return best;
 }
-const GROUND = { top: 0, ground: true }, PILLAR_TOP = { top: TOP, ground: true };
 // Knuffa ut gubben ur väggar/plattformskanter (inte det man står på eller kan kliva upp på)
 function pushOut(x, z, y, tol) {
   for (let pass = 0; pass < 2; pass++) {
@@ -183,8 +183,8 @@ function pushOut(x, z, y, tol) {
       else { const px = b.hx - Math.abs(lx), pz = b.hz - Math.abs(lz); if (px < pz) lx = Math.sign(lx || 1) * (b.hx + RAD); else lz = Math.sign(lz || 1) * (b.hz + RAD); }
       [x, z] = toWorld(b, lx, lz);
     }
-    // tornet i mitten
-    if (y < TOP - tol) { const d = Math.hypot(x, z), m = pillarR(y) + RAD; if (d < m) { const k = m / Math.max(d, 1e-4); x *= k; z *= k; } }
+    // tornväggen runt om (och räcket på taket)
+    if (y < TOP + 1.4) { const d = Math.hypot(x, z), m = WALL_R - RAD - 0.05; if (d > m) { x *= m / d; z *= m / d; } }
   }
   return [x, z];
 }
@@ -199,48 +199,86 @@ function canvasTex(w, h, draw) {
   return t;
 }
 const arrowTex = canvasTex(128, 128, (g, w, h) => {
-  g.fillStyle = '#3a3550'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#ffd84a';
+  g.fillStyle = '#8f6fe6'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffffff';
   g.beginPath(); g.moveTo(64, 14); g.lineTo(112, 62); g.lineTo(90, 62); g.lineTo(64, 36); g.lineTo(38, 62); g.lineTo(16, 62); g.closePath(); g.fill();
   g.beginPath(); g.moveTo(64, 70); g.lineTo(112, 118); g.lineTo(90, 118); g.lineTo(64, 92); g.lineTo(38, 118); g.lineTo(16, 118); g.closePath(); g.fill();
 });
 arrowTex.wrapS = arrowTex.wrapT = THREE.RepeatWrapping;
-const hazardTex = canvasTex(128, 128, (g, w, h) => {
-  g.fillStyle = '#ffd84a'; g.fillRect(0, 0, w, h); g.fillStyle = '#2a2f45';
+const liftTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#ffd3ee'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff8fd0';
   for (let i = -2; i < 4; i++) { g.beginPath(); g.moveTo(i * 48, 0); g.lineTo(i * 48 + 24, 0); g.lineTo(i * 48 + 24 + h, h); g.lineTo(i * 48 + h, h); g.fill(); }
 });
-hazardTex.wrapS = hazardTex.wrapT = THREE.RepeatWrapping;
-const stripeTex = canvasTex(64, 64, (g, w, h) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); g.fillStyle = '#e23b4e'; g.fillRect(0, 0, w / 2, h); });
+liftTex.wrapS = liftTex.wrapT = THREE.RepeatWrapping;
+const stripeTex = canvasTex(64, 64, (g, w, h) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); g.fillStyle = '#ff6fbf'; g.fillRect(0, 0, w / 2, h); });
 stripeTex.wrapS = stripeTex.wrapT = THREE.RepeatWrapping;
-const blobTex = canvasTex(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 2, 32, 32, 30); r.addColorStop(0, 'rgba(0,0,0,.55)'); r.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); });
+const floorTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); g.fillStyle = '#ece3f6'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  g.fillStyle = 'rgba(255,255,255,.9)'; for (const [x, y] of [[32, 32], [96, 96]]) { g.beginPath(); g.arc(x, y, 9, 0, 7); g.fill(); }
+});
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+// Såpbubbla: genomskinlig med glänsande kant och en vit blänk
+const bubbleTex = canvasTex(128, 128, (g) => {
+  const r = g.createRadialGradient(64, 64, 18, 64, 64, 62);
+  r.addColorStop(0, 'rgba(255,255,255,0.06)'); r.addColorStop(0.72, 'rgba(255,255,255,0.2)'); r.addColorStop(0.93, 'rgba(255,255,255,0.85)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
+  g.lineWidth = 4;
+  g.strokeStyle = 'rgba(150,215,255,.7)'; g.beginPath(); g.arc(64, 64, 56, 0.2, 2.2); g.stroke();
+  g.strokeStyle = 'rgba(255,160,225,.7)'; g.beginPath(); g.arc(64, 64, 56, 3.2, 5.0); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.95)'; g.beginPath(); g.ellipse(44, 40, 13, 7, -0.7, 0, 7); g.fill();
+  g.beginPath(); g.arc(34, 56, 3.5, 0, 7); g.fill();
+});
+const blobTex = canvasTex(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 2, 32, 32, 30); r.addColorStop(0, 'rgba(90,40,120,.45)'); r.addColorStop(1, 'rgba(90,40,120,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); });
 const glowTex = canvasTex(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 1, 32, 32, 31); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.4, 'rgba(255,255,255,.5)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); });
 
-/* ---------- Banan byggs ---------- */
-const THEMES = [['#ff5ccf', '#ffd0f2'], ['#3ee8ff', '#cbf9ff'], ['#8dff5a', '#ddffcc'], ['#ffd84a', '#fff3c2'], ['#8a5cff', '#ddd0ff'], ['#ff7a3d', '#ffd8c4']];
-let T = THEMES[0], G = null;                         // aktuell färg och grupp (statiska delar slås ihop per sektion)
+/* ---------- Banan byggs: våning för våning inne i ett runt torn ---------- */
+// Pastellfärger per våning: [plattform, ljus, vägg]
+const THEMES = [
+  ['#ff8fd0', '#ffd3ee', '#ffe3f3'],   // rosa bubbelgum
+  ['#5fdcb6', '#c4f7e5', '#dcfbf0'],   // mint
+  ['#ad92ff', '#e2d8ff', '#ece6ff'],   // lavendel
+  ['#ffa577', '#ffd9c4', '#ffeadf'],   // persika
+  ['#ffcf4d', '#fff0b3', '#fff6d6'],   // citron
+  ['#74c2ff', '#cfe9ff', '#e2f2ff']    // himmelsblå
+];
+let T = THEMES[0], G = null;                         // aktuell färg och grupp (statiska delar slås ihop per våning)
 const sections = [];
 const dyn = [];                                     // rörliga plattformar
 const spinners = [];
 const belts = [];
 const checkpoints = [];
 const portals = [];
+const bubbles = [];                                 // studsbubblor
 const cur = { x: PATH_R, y: 0, z: 0 };
 const fx = new THREE.Group(); scene.add(fx);          // saker som rör sig/lyser (slås inte ihop)
 
 function mesh(geo, mat, x, y, z, yaw = 0, parent = G) {
   const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.y = yaw; parent.add(m); return m;
 }
-// Plattform med ovansidan på höjden top
+// Mjuk "godisbit": låda med rundade hörn och kanter
+function roundBox(w, h, l) {
+  const b = Math.min(0.12, h * 0.3), r = Math.min(0.35, w * 0.25, l * 0.25);
+  const x0 = -w / 2 + b, x1 = w / 2 - b, z0 = -l / 2 + b, z1 = l / 2 - b;
+  const rr = Math.max(0.02, Math.min(r, (x1 - x0) / 2 - 0.01, (z1 - z0) / 2 - 0.01));
+  const s = new THREE.Shape();
+  s.moveTo(x0 + rr, z0); s.lineTo(x1 - rr, z0); s.quadraticCurveTo(x1, z0, x1, z0 + rr);
+  s.lineTo(x1, z1 - rr); s.quadraticCurveTo(x1, z1, x1 - rr, z1);
+  s.lineTo(x0 + rr, z1); s.quadraticCurveTo(x0, z1, x0, z1 - rr);
+  s.lineTo(x0, z0 + rr); s.quadraticCurveTo(x0, z0, x0 + rr, z0);
+  const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.01, h - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 1, curveSegments: 3 });
+  g.rotateX(Math.PI / 2); g.translate(0, (h - 2 * b) / 2, 0);
+  return g;
+}
 const route = [];                                   // alla plattformar i ordning (för test av banan)
 let curKind = 'start';
-function platform(x, top, z, w, l, yaw, color, { thick = 0.7, cap = true, capColor = null, ...opts } = {}) {
+// Plattform med ovansidan på höjden top
+function platform(x, top, z, w, l, yaw, color, { thick = 0.7, ...opts } = {}) {
   const b = addBox({ x, y: top - thick / 2, z, hx: w / 2, hy: thick / 2, hz: l / 2, yaw, ...opts });
   route.push({ b, kind: curKind });
-  mesh(new THREE.BoxGeometry(w, thick, l), lam(color), x, top - thick / 2, z, yaw);
-  if (cap && w > 0.8 && l > 0.8) mesh(new THREE.BoxGeometry(w - 0.16, 0.05, l - 0.16), lam(capColor || T[1]), x, top + 0.005, z, yaw);
+  mesh(roundBox(w, thick, l), lam(color), x, top - thick / 2, z, yaw);
   return b;
 }
-// Riktning framåt: siktar på en punkt på spiralen (cirkeln runt tornet) en bit fram
+// Riktning framåt: siktar på en punkt på spiralen (cirkeln längs tornväggen) en bit fram
 function dirAhead(len) {
   const a = Math.atan2(cur.z, cur.x) + Math.max(0.6, len) / PATH_R;
   const dx = Math.cos(a) * PATH_R - cur.x, dz = Math.sin(a) * PATH_R - cur.z, L = Math.hypot(dx, dz) || 1;
@@ -250,22 +288,23 @@ const along = (d, dist, lat = 0) => ({ x: cur.x + d.x * dist + d.lx * lat, z: cu
 function advance(d, dist, dy = 0) { cur.x += d.x * dist; cur.z += d.z * dist; cur.y += dy; }
 
 function pLanding(size = 3) { const d = dirAhead(size), p = along(d, size / 2); platform(p.x, cur.y, p.z, Math.max(3, size), size, d.yaw, T[0]); advance(d, size); }
-function pStairs(n, rise, w = 3) {
+function pStairs(n, rise, w = 3, landing = true) {
   curKind = 'stairs';
-  const run = 0.8, d = dirAhead(n * run);
+  const run = 0.8, d = dirAhead(n * run), S = { x: cur.x, z: cur.z, y: cur.y, d, run, n, rise };
   for (let i = 1; i <= n; i++) {
     const p = along(d, run * (i - 0.5));
-    platform(p.x, cur.y + rise * i, p.z, w, run + 0.02, d.yaw, i % 2 ? T[0] : T[1], { cap: false, thick: Math.min(1.2, 0.5 + rise * 1.5) });
+    platform(p.x, cur.y + rise * i, p.z, w, run + 0.02, d.yaw, i % 2 ? T[0] : T[1], { thick: Math.min(1.2, 0.5 + rise * 1.5) });
   }
   advance(d, n * run, rise * n);
-  pLanding(2.4);
+  if (landing) pLanding(2.4);
+  return S;
 }
 function pJumps(n, gap, rise, size, zig = 0) {
   curKind = 'jumps';
   for (let i = 0; i < n; i++) {
     const d = dirAhead(gap + size), lat = zig ? (i % 2 ? zig : -zig) : 0;
     const p = along(d, gap + size / 2, lat);
-    platform(p.x, cur.y + rise, p.z, size, size, d.yaw, i % 2 ? T[0] : '#ffffff', { capColor: i % 2 ? T[1] : T[0] });
+    platform(p.x, cur.y + rise, p.z, size, size, d.yaw, i % 2 ? T[0] : T[1]);
     advance(d, gap + size, rise);
   }
   pLanding(3);
@@ -273,45 +312,52 @@ function pJumps(n, gap, rise, size, zig = 0) {
 function pBeam(len, w) {
   curKind = 'beam';
   const d = dirAhead(len), p = along(d, len / 2);
-  platform(p.x, cur.y, p.z, w, len, d.yaw, '#fff2c4', { thick: 0.35, cap: false });
+  platform(p.x, cur.y, p.z, w, len, d.yaw, '#ffffff', { thick: 0.35 });
   advance(d, len);
   pLanding(3);
 }
 function pBelt(len, mode, speed) {
   curKind = 'belt';
   const w = 3, d = dirAhead(len), p = along(d, len / 2);
-  const b = platform(p.x, cur.y, p.z, w, len, d.yaw, '#2a2f45', { cap: false });
+  const b = platform(p.x, cur.y, p.z, w, len, d.yaw, '#8f6fe6');
   // Pilarna på bandet visar åt vilket håll det går
-  const holder = new THREE.Group(); holder.position.set(p.x, cur.y + 0.02, p.z); holder.rotation.y = d.yaw; fx.add(holder);
+  const holder = new THREE.Group(); holder.position.set(p.x, cur.y + 0.03, p.z); holder.rotation.y = d.yaw; fx.add(holder);
   let geo, push;
-  if (mode === 'back') { geo = new THREE.PlaneGeometry(w - 0.2, len - 0.2); geo.rotateX(-Math.PI / 2); push = [0, -1]; }
-  else { const sg = R() < 0.5 ? 1 : -1; geo = new THREE.PlaneGeometry(len - 0.2, w - 0.2); geo.rotateX(-Math.PI / 2); geo.rotateY(sg * Math.PI / 2); push = [-sg, 0]; }
+  if (mode === 'back') { geo = new THREE.PlaneGeometry(w - 0.3, len - 0.3); geo.rotateX(-Math.PI / 2); push = [0, -1]; }
+  else { const sg = R() < 0.5 ? 1 : -1; geo = new THREE.PlaneGeometry(len - 0.3, w - 0.3); geo.rotateX(-Math.PI / 2); geo.rotateY(sg * Math.PI / 2); push = [-sg, 0]; }
   const tex = arrowTex.clone(); tex.needsUpdate = true;
-  // en pil per ~1,4 m i båda riktningar
-  if (mode === 'back') tex.repeat.set((w - 0.2) / 1.4, (len - 0.2) / 1.4); else tex.repeat.set((len - 0.2) / 1.4, (w - 0.2) / 1.4);
-  const pm = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex })); holder.add(pm);
+  if (mode === 'back') tex.repeat.set((w - 0.3) / 1.4, (len - 0.3) / 1.4); else tex.repeat.set((len - 0.3) / 1.4, (w - 0.3) / 1.4);
+  holder.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex })));
   const [wx, wz] = [push[0] * b.c + push[1] * b.s, -push[0] * b.s + push[1] * b.c];
   b.belt = { vx: wx * speed, vz: wz * speed };
-  belts.push({ tex, speed, mesh: holder, y: cur.y, len: mode === 'back' ? (len - 0.2) : (w - 0.2) });
+  belts.push({ tex, speed, mesh: holder, y: cur.y });
   advance(d, len);
   pLanding(3);
 }
-function pPad(dh) {
-  curKind = 'pad';
-  const size = 2.8; let d = dirAhead(size + 0.3); let p = along(d, 0.3 + size / 2);
-  const pb = platform(p.x, cur.y, p.z, size, size, d.yaw, '#2f6db5', { capColor: '#3ee8ff' });
-  mesh(new THREE.CylinderGeometry(1.05, 1.15, 0.22, 24), lam('#ffffff'), p.x, cur.y + 0.11, p.z, 0, G);
-  mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.24, 24), lam('#ff5ccf'), p.x, cur.y + 0.12, p.z, 0, G);
-  // pil uppåt som svävar
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.7, 4), new THREE.MeshBasicMaterial({ color: '#ffd84a' }));
-  const ay = cur.y;
-  arrow.position.set(p.x, ay + 1.6, p.z); fx.add(arrow);
-  dyn.push({ vis: arrow, y: ay, update: t => { arrow.position.y = ay + 1.5 + Math.sin(t * 4) * 0.25; arrow.rotation.y = t * 2; } });
-  advance(d, 0.3 + size);
-  const d2 = dirAhead(4.4), tp = along(d2, 1.4 + 1.6);
-  platform(tp.x, cur.y + dh, tp.z, 3.2, 3.2, d2.yaw, T[0]);
-  pb.pad = { x: tp.x, y: cur.y + dh, z: tp.z };
-  cur.x = tp.x + d2.x * 1.6; cur.z = tp.z + d2.z * 1.6; cur.y += dh;
+/* Studsbubblor: man hoppar upp på den första, sedan studsar man från bubbla till bubbla (de smäller) */
+function pBubbles(dh) {
+  curKind = 'bubbles';
+  const first = 1.0, n = Math.max(2, Math.min(5, Math.round((dh - first) / 2.8))), step = (dh - first) / n;
+  const list = [];
+  let top = cur.y + first;
+  for (let i = 0; i < n; i++) {
+    const d = dirAhead(i === 0 ? 2.6 : 3.4), p = along(d, i === 0 ? 2.6 : 3.4);
+    const b = addBox({ x: p.x, y: top - 0.15, z: p.z, hx: 0.8, hy: 0.15, hz: 0.8, yaw: d.yaw });
+    route.push({ b, kind: 'bubble' });
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex, color: ['#ffd1f0', '#d6f6ff', '#e9dcff', '#fff0c4'][i % 4], transparent: true, depthWrite: false }));
+    spr.position.set(p.x, top - 0.85, p.z); spr.scale.setScalar(2.2); fx.add(spr);
+    const bub = { b, spr, x: p.x, y: top - 0.85, z: p.z, popT: 0, ph: R() * 6 };
+    b.bubble = bub; bubbles.push(bub); list.push(b);
+    dyn.push({ vis: spr, y: top });
+    cur.x = p.x; cur.z = p.z; cur.y = top;
+    top += step;
+  }
+  // landningsplatta efter sista bubblan
+  const d = dirAhead(3.6), p = along(d, 3.6);
+  curKind = 'bubbles';
+  const land = platform(p.x, cur.y + step, p.z, 3.4, 3.4, d.yaw, T[0]);
+  list.forEach((b, i) => { const t = list[i + 1] || land; b.bounce = { x: t.x, y: t.top, z: t.z }; });
+  cur.x = p.x + d.x * 1.7; cur.z = p.z + d.z * 1.7; cur.y += step;
   pLanding(2.4);
 }
 function pLift(dh) {
@@ -321,10 +367,9 @@ function pLift(dh) {
   const y0 = cur.y, y1 = cur.y + dh;
   const b = addBox({ x: p.x, y: y0 - 0.35, z: p.z, hx: size / 2, hy: 0.35, hz: size / 2, yaw: d.yaw, dyn: true, ymin: y0 - 0.35, ymax: y1 - 0.35 });
   route.push({ b, kind: 'liftcar', y0, y1 });
-  const m = new THREE.Mesh(new THREE.BoxGeometry(size, 0.7, size), [lam('#ffd84a'), lam('#ffd84a'), new THREE.MeshLambertMaterial({ map: hazardTex }), lam('#c99a1c'), lam('#ffd84a'), lam('#ffd84a')]);
+  const m = new THREE.Mesh(roundBox(size, 0.7, size), new THREE.MeshLambertMaterial({ map: liftTex }));
   m.rotation.y = d.yaw; fx.add(m);
-  // två skenor som hissen åker längs
-  for (const s of [-1, 1]) { const q = along(d, gap + size / 2, s * (size / 2 + 0.25)); mesh(new THREE.CylinderGeometry(0.1, 0.1, dh + 3, 8), lam('#c9c3ff'), q.x, y0 + (dh + 3) / 2 - 0.7, q.z); }
+  for (const s of [-1, 1]) { const q = along(d, gap + size / 2, s * (size / 2 + 0.25)); mesh(new THREE.CylinderGeometry(0.1, 0.1, dh + 3, 8), lam('#ffffff'), q.x, y0 + (dh + 3) / 2 - 0.7, q.z); }
   const up = 3.4, wait = 1.6, per = 2 * (up + wait), ph = R() * per;
   const ease = t => t * t * (3 - 2 * t);
   dyn.push({
@@ -339,6 +384,7 @@ function pLift(dh) {
   advance(d, gap + size);
   cur.y = y1;
   advance(d, gap);
+  curKind = 'lift';
   pLanding(3);
 }
 function pMover(gap) {
@@ -347,7 +393,7 @@ function pMover(gap) {
   const a = along(d, size / 2 + 0.15), c = along(d, gap - size / 2 - 0.15), y = cur.y;
   const b = addBox({ x: a.x, y: y - 0.35, z: a.z, hx: size / 2, hy: 0.35, hz: size / 2, yaw: d.yaw, dyn: true });
   route.push({ b, kind: 'movercar', a, c });
-  const m = new THREE.Mesh(new THREE.BoxGeometry(size, 0.7, size), [lam('#3ee8ff'), lam('#3ee8ff'), lam('#cbf9ff'), lam('#1a8fae'), lam('#3ee8ff'), lam('#3ee8ff')]);
+  const m = new THREE.Mesh(roundBox(size, 0.7, size), lam('#74e0ff'));
   m.rotation.y = d.yaw; fx.add(m);
   const dist = Math.hypot(c.x - a.x, c.z - a.z), go = dist / 1.7, wait = 1.2, per = 2 * (go + wait), ph = R() * per;
   const ease = t => t * t * (3 - 2 * t);
@@ -361,170 +407,205 @@ function pMover(gap) {
     }
   });
   advance(d, gap);
+  curKind = 'mover';
   pLanding(3);
 }
 function pSpinner(speed) {
   curKind = 'spinner';
   const size = 7, d = dirAhead(size), p = along(d, size / 2);
-  platform(p.x, cur.y, p.z, size, size, d.yaw, T[0]);
+  platform(p.x, cur.y, p.z, size, size, d.yaw, T[1]);
   const pivot = new THREE.Group(); pivot.position.set(p.x, cur.y + 0.55, p.z); fx.add(pivot);
-  pivot.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 1.1, 16), lam('#2a2f45')));
+  pivot.add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 1.1, 16), lam('#ffffff')));
   const tex = stripeTex.clone(); tex.needsUpdate = true; tex.repeat.set(8, 1);
   const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 6.4, 12), new THREE.MeshLambertMaterial({ map: tex }));
   bar.rotation.z = Math.PI / 2; pivot.add(bar);
   spinners.push({ x: p.x, z: p.z, y: cur.y + 0.55, len: 3.2, r: 0.22, w: speed * (R() < 0.5 ? 1 : -1), a: R() * 6, pivot });
   dyn.push({ vis: pivot, y: cur.y });
   advance(d, size);
+  pLanding(2.6);
 }
 function flagMesh(x, y, z, yaw) {
   const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = yaw; fx.add(g);
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.6, 8), lam('#ffffff')); pole.position.set(0, 1.3, 0); g.add(pole);
   const shape = new THREE.Shape(); shape.moveTo(0, 0); shape.lineTo(1.1, -0.35); shape.lineTo(0, -0.7); shape.closePath();
-  const cloth = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshLambertMaterial({ color: '#9a9ab0', side: THREE.DoubleSide }));
+  const cloth = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshLambertMaterial({ color: '#c9c3df', side: THREE.DoubleSide }));
   cloth.position.set(0.05, 2.55, 0); g.add(cloth);
   return { g, cloth };
 }
 function pCheckpoint(start = false) {
   curKind = 'cp';
   const size = 4, d = dirAhead(size), p = along(d, size / 2);
-  const b = platform(p.x, cur.y, p.z, size, size, d.yaw, '#ffffff', { capColor: start ? '#ffd84a' : '#e6fff0' });
-  const glow = mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.06, 28), new THREE.MeshBasicMaterial({ color: start ? '#ffd84a' : '#5ad04a' }), p.x, cur.y + 0.04, p.z, 0, fx);
+  const b = platform(p.x, cur.y, p.z, size, size, d.yaw, '#ffffff');
+  const glow = mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.06, 28), new THREE.MeshBasicMaterial({ color: start ? '#ffd84a' : '#7ff0c0' }), p.x, cur.y + 0.04, p.z, 0, fx);
   const q = along(d, size / 2, size / 2 - 0.4);
   const flag = flagMesh(q.x, cur.y, q.z, d.yaw);
   b.cp = checkpoints.length;
-  checkpoints.push({ x: p.x, y: cur.y, z: p.z, heading: Math.atan2(d.x, d.z), flag, glow, start });
+  checkpoints.push({ x: p.x, y: cur.y, z: p.z, heading: Math.atan2(d.x, d.z), flag, glow, start, ri: route.length });
   dyn.push({ vis: flag.g, y: cur.y });
   advance(d, size);
 }
-/* Portalvåning: tre portaler i en vägg, man måste gå igenom en av dem */
-function pPortal(k) {
+
+/* Golv mellan våningarna: en rund skiva med ett hål där trappan kommer upp underifrån */
+const FLOOR_T = 1.0;
+function slab(y, hole, theme) {
+  const R2 = WALL_R + PATH_R + 3;
+  if (hole) {
+    const { ox, oz, yaw, x0, x1, z0, z1 } = hole, c = Math.cos(yaw), s = Math.sin(yaw);
+    const W = (lx, lz) => [ox + lx * c + lz * s, oz - lx * s + lz * c];
+    const part = (a0, a1, b0, b1) => { const [x, z] = W((a0 + a1) / 2, (b0 + b1) / 2); addBox({ x, y: y - FLOOR_T / 2, z, hx: (a1 - a0) / 2, hy: FLOOR_T / 2, hz: (b1 - b0) / 2, yaw, floor: true }); };
+    part(-R2, x0, -R2, R2); part(x1, R2, -R2, R2); part(x0, x1, -R2, z0); part(x0, x1, z1, R2);
+  } else addBox({ x: 0, y: y - FLOOR_T / 2, z: 0, hx: R2, hy: FLOOR_T / 2, hz: R2, yaw: 0, floor: true });
+  // utseende: rund skiva (hålet urklippt)
+  const shp = new THREE.Shape(); shp.absarc(0, 0, WALL_R + 0.05, 0, Math.PI * 2, false);
+  if (hole) {
+    const { ox, oz, yaw, x0, x1, z0, z1 } = hole, c = Math.cos(yaw), s = Math.sin(yaw);
+    const W = (lx, lz) => new THREE.Vector2(ox + lx * c + lz * s, oz - lx * s + lz * c);
+    const h = new THREE.Path(); const pts = [W(x0, z0), W(x0, z1), W(x1, z1), W(x1, z0)];
+    h.moveTo(pts[0].x, pts[0].y); for (const q of pts.slice(1)) h.lineTo(q.x, q.y); h.closePath();
+    shp.holes.push(h);
+  }
+  const g = new THREE.ExtrudeGeometry(shp, { depth: FLOOR_T, bevelEnabled: false, curveSegments: 40 });
+  g.rotateX(Math.PI / 2);
+  const tex = floorTex.clone(); tex.needsUpdate = true; tex.repeat.set(0.25, 0.25);
+  const m = new THREE.Mesh(g, [new THREE.MeshLambertMaterial({ map: tex, color: theme[1] }), lam(theme[0])]);
+  m.position.y = y; scene.add(m);
+  return m;
+}
+/* Portalvägg tvärs över golvet (genom tornets mitt) med tre portaler där banan går */
+function pPortal(k, y, ang) {
   curKind = 'portal';
-  const W = 10, L = 13, d = dirAhead(L), O = along(d, L / 2), y = cur.y;
-  const b = platform(O.x, y, O.z, W, L, d.yaw, '#ffffff', { capColor: '#f3eeff', thick: 1 });
-  const Pt = { k, x: O.x, z: O.z, y, d, gates: [], chosen: -1, opts: null, cat: null };
-  const W2 = (lx, lz) => [O.x + d.lx * lx + d.x * lz, O.z + d.lz * lx + d.z * lz];
-  const wallZ = 1.0, wallH = 5.0, open = 3.3;
+  const u = { x: Math.cos(ang), z: Math.sin(ang) }, t = { x: -Math.sin(ang), z: Math.cos(ang) };   // längs väggen / framåt
+  const W2 = (lx, lz) => [u.x * lx + t.x * lz, u.z * lx + t.z * lz];
+  const Pt = { k, x: u.x * PATH_R, z: u.z * PATH_R, y, u, t, gates: [], chosen: -1, opts: null, cat: null };
+  const wallH = 5.0, open = 3.3, yawW = -ang;
   const wall = (x0, x1, y0, y1, color) => {
-    const [wx, wz] = W2((x0 + x1) / 2, wallZ);
-    addBox({ x: wx, y: y + (y0 + y1) / 2, z: wz, hx: (x1 - x0) / 2, hy: (y1 - y0) / 2, hz: 0.3, yaw: d.yaw });
-    mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, 0.6), lam(color), wx, y + (y0 + y1) / 2, wz, d.yaw);
+    const [wx, wz] = W2((x0 + x1) / 2, 0);
+    addBox({ x: wx, y: y + (y0 + y1) / 2, z: wz, hx: (x1 - x0) / 2, hy: (y1 - y0) / 2, hz: 0.3, yaw: yawW });
+    mesh(roundBox(x1 - x0, y1 - y0, 0.6), lam(color), wx, y + (y0 + y1) / 2, wz, yawW, G);
   };
-  for (const [x0, x1] of [[-6.2, -4.4], [-2.2, -1.1], [1.1, 2.2], [4.4, 6.2]]) wall(x0, x1, 0, wallH, '#8a5cff');
-  for (const [x0, x1] of [[-4.4, -2.2], [-1.1, 1.1], [2.2, 4.4]]) wall(x0, x1, open, wallH, '#8a5cff');
-  wall(-6.2, 6.2, wallH, wallH + 0.4, '#ffd84a');
-  // portalerna (ljusfilm + lysande ram + skylt ovanför)
-  [-3.3, 0, 3.3].forEach((lx, i) => {
-    const [gx, gz] = W2(lx, wallZ);
+  const g0 = PATH_R - 3.3, g1 = PATH_R, g2 = PATH_R + 3.3;
+  wall(-WALL_R, -0.6, 0, 3.4, T[0]); wall(-WALL_R, -0.6, 3.4, 3.8, '#ffffff');      // bortre halvan: lägre (går inte att hoppa över)
+  for (const [x0, x1] of [[-0.6, g0 - 1.1], [g0 + 1.1, g1 - 1.1], [g1 + 1.1, g2 - 1.1], [g2 + 1.1, WALL_R]]) wall(x0, x1, 0, wallH, T[0]);
+  for (const gx of [g0, g1, g2]) wall(gx - 1.1, gx + 1.1, open, wallH, T[0]);
+  wall(-0.6, WALL_R, wallH, wallH + 0.5, '#ffffff');
+  [g0, g1, g2].forEach(gx => {
+    const [fx0, fz0] = W2(gx, 0);
     const film = new THREE.Mesh(new THREE.PlaneGeometry(2.2, open), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
-    film.position.set(gx, y + open / 2, gz); film.rotation.y = d.yaw; fx.add(film);
+    film.position.set(fx0, y + open / 2, fz0); film.rotation.y = yawW; fx.add(film);
     const frameM = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-    const fr = new THREE.Group(); fr.position.set(gx, y, gz); fr.rotation.y = d.yaw; fx.add(fr);
-    for (const [fx0, fy0, fw, fh] of [[-1.15, open / 2, 0.14, open], [1.15, open / 2, 0.14, open], [0, open + 0.02, 2.44, 0.14]]) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.7), frameM); bar.position.set(fx0, fy0, 0); fr.add(bar);
+    const fr = new THREE.Group(); fr.position.set(fx0, y, fz0); fr.rotation.y = yawW; fx.add(fr);
+    for (const [bx, by, bw, bh] of [[-1.15, open / 2, 0.16, open], [1.15, open / 2, 0.16, open], [0, open + 0.02, 2.46, 0.16]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.7), frameM); bar.position.set(bx, by, 0); fr.add(bar);
     }
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.3), new THREE.MeshBasicMaterial({ map: unknownTex, transparent: true }));
-    const [sx, sz] = W2(lx, wallZ - 0.36); sign.position.set(sx, y + (open + wallH) / 2 + 0.05, sz); sign.rotation.y = d.yaw + Math.PI; fx.add(sign);
-    Pt.gates.push({ lx, film, frameM, sign, fr });
+    const [sx, sz] = W2(gx, -0.36); sign.position.set(sx, y + (open + wallH) / 2 + 0.05, sz); sign.rotation.y = Math.PI - ang; fx.add(sign);
+    Pt.gates.push({ lx: gx, film, frameM, sign, fr });
   });
   const head = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.6), new THREE.MeshBasicMaterial({ map: unknownHead, transparent: true }));
-  const [hx, hz] = W2(0, wallZ - 0.4); head.position.set(hx, y + wallH + 1.25, hz); head.rotation.y = d.yaw + Math.PI; fx.add(head);
+  const [hx, hz] = W2(g1, -0.42); head.position.set(hx, y + wallH + 1.35, hz); head.rotation.y = Math.PI - ang; fx.add(head);
   Pt.head = head;
-  // höjdskylt på golvet
-  const [nx, nz] = W2(0, -5.2);
-  const num = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.2), new THREE.MeshBasicMaterial({ map: canvasTex(256, 96, (g, w, h) => { g.fillStyle = '#8a5cff'; g.font = 'bold 76px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText((k + 1) * SECTION + ' m', w / 2, h / 2 + 4); }), transparent: true }));
-  num.rotation.x = -Math.PI / 2; num.rotation.z = d.yaw + Math.PI; num.position.set(nx, y + 0.04, nz); fx.add(num);
+  // höjdskylt på golvet framför portalerna
+  const [nx, nz] = W2(g0 - 2.6, -2.4);                                   // vid sidan om, där trappan inte kommer upp
+  const num = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.2), new THREE.MeshBasicMaterial({ map: canvasTex(256, 96, (g, w, h) => { g.fillStyle = '#ff5ccf'; g.font = 'bold 76px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText((k + 1) * SECTION + ' m', w / 2, h / 2 + 4); }), transparent: true }));
+  num.rotation.x = -Math.PI / 2; num.rotation.z = Math.atan2(t.x, t.z) + Math.PI; num.position.set(nx, y + 0.03, nz); fx.add(num);
   // checkpoints före och efter väggen
-  const [ix, iz] = W2(0, -4.5), [ox, oz] = W2(0, 4.6);
-  Pt.cpIn = checkpoints.length; checkpoints.push({ x: ix, y, z: iz, heading: Math.atan2(d.x, d.z), portal: Pt });
-  Pt.cpOut = checkpoints.length; checkpoints.push({ x: ox, y, z: oz, heading: Math.atan2(d.x, d.z), portal: Pt, after: true });
-  b.portal = Pt;
+  const [ix, iz] = W2(g1, -2.8), [ox, oz] = W2(g1, 2.8);
+  const hd = Math.atan2(t.x, t.z);
+  Pt.cpIn = checkpoints.length; checkpoints.push({ x: ix, y, z: iz, heading: hd, portal: Pt, ri: route.length });
+  Pt.cpOut = checkpoints.length; checkpoints.push({ x: ox, y, z: oz, heading: hd, portal: Pt, after: true, ri: route.length });
   portals.push(Pt);
   dyn.push({ vis: null, y, group: [head, num, ...Pt.gates.flatMap(g => [g.film, g.sign, g.fr])] });
-  advance(d, L);
+  // banan fortsätter efter väggen
+  cur.x = ox; cur.z = oz; cur.y = y;
 }
 const unknownTex = canvasTex(256, 128, (g, w, h) => {
-  g.fillStyle = 'rgba(20,14,70,.85)'; roundRectP(g, 4, 4, w - 8, h - 8, 26); g.fill();
+  g.fillStyle = 'rgba(120,60,170,.88)'; roundRectP(g, 4, 4, w - 8, h - 8, 26); g.fill();
   g.strokeStyle = '#fff'; g.lineWidth = 6; g.stroke();
   g.fillStyle = '#fff'; g.font = 'bold 84px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', w / 2, h / 2 + 6);
 });
 const unknownHead = canvasTex(512, 110, (g, w, h) => {
-  g.fillStyle = 'rgba(20,14,70,.85)'; roundRectP(g, 4, 4, w - 8, h - 8, 40); g.fill();
+  g.fillStyle = 'rgba(120,60,170,.88)'; roundRectP(g, 4, 4, w - 8, h - 8, 40); g.fill();
   g.strokeStyle = '#ffd84a'; g.lineWidth = 6; g.stroke();
   g.fillStyle = '#ffd84a'; g.font = 'bold 56px Fredoka, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('Portal ✨', w / 2, h / 2 + 4);
 });
 function roundRectP(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
-function pTop() {
-  curKind = 'top';
-  // sista plattformen och en bro in på tornets tak där pokalen står
-  const W = 9, L = 8, d = dirAhead(L), O = along(d, L / 2);
-  platform(O.x, TOP, O.z, W, L, d.yaw, '#ffd84a', { capColor: '#fff3c2' });
-  const ang = Math.atan2(O.z, O.x), bx = Math.cos(ang) * (PILLAR_R + 2.2), bz = Math.sin(ang) * (PILLAR_R + 2.2);
-  platform(bx, TOP, bz, 3.5, 5, Math.atan2(-Math.cos(ang), -Math.sin(ang)), '#ffd84a', { capColor: '#fff3c2' });
-  advance(d, L);
-}
 
-/* Bygg hela banan: sektion för sektion (en sektion = 50 m) */
+/* Bygg hela banan: våning för våning (en våning = 50 m) */
+const floors = [];
 function buildCourse() {
   G = new THREE.Group(); scene.add(G); sections.push(G);
-  cur.x = PATH_R; cur.z = 0; cur.y = 0.4;
+  floors.push(slab(0, null, THEMES[0]));
+  cur.x = PATH_R; cur.z = 0; cur.y = 0.3;
   pCheckpoint(true);
   for (let s = 0; s < TOP / SECTION; s++) {
     if (s > 0) { G = new THREE.Group(); scene.add(G); sections.push(G); }
     T = THEMES[s % THEMES.length];
     const k = s / 19, y1 = (s + 1) * SECTION;
-    let lastCp = cur.y, lastChallenge = '', lastClimb = '', turn = 0;
-    const climbs = s < 1 ? ['stairs', 'jumpsUp', 'pad', 'stairs'] : s < 3 ? ['stairs', 'jumpsUp', 'pad', 'lift'] : ['stairs', 'jumpsUp', 'pad', 'lift', 'zigzag'];
-    const challenges = s < 1 ? ['beam', 'jumps'] : s < 2 ? ['beam', 'jumps', 'belt', 'mover'] : ['beam', 'jumps', 'belt', 'mover', 'spinner'];
-    while (cur.y < y1 - 7) {
+    let lastCp = cur.y, lastChallenge = '', lastClimb = '', turn = s > 0 ? 1 : 0;
+    const climbs = s < 1 ? ['stairs', 'jumpsUp', 'bubbles', 'stairs'] : s < 3 ? ['stairs', 'jumpsUp', 'bubbles', 'lift'] : ['stairs', 'jumpsUp', 'bubbles', 'lift', 'zigzag', 'bubbles'];
+    const challenges = s < 1 ? ['beam', 'jumps'] : s < 2 ? ['beam', 'jumps', 'belt', 'mover'] : ['beam', 'jumps', 'belt', 'mover', 'spinner', 'bigjump'];
+    while (cur.y < y1 - 9.5) {
       if (turn++ % 2 === 0) {
         let c; do { c = challenges[ri(0, challenges.length - 1)]; } while (c === lastChallenge && challenges.length > 1);
         lastChallenge = c;
         if (c === 'beam') pBeam(rr(6, 9 + 3 * k), 0.95 - 0.35 * k);
         else if (c === 'jumps') pJumps(ri(3, 5), rr(1.1, 1.5 + 0.4 * k), 0, 2.6 - 0.6 * k);
+        else if (c === 'bigjump') pJumps(ri(2, 3), rr(2.8, 3.4), 0, 2.8);          // långa hopp: använd dubbelhoppet!
         else if (c === 'belt') pBelt(rr(8, 11), R() < 0.55 ? 'side' : 'back', R() < 0.5 ? 1.5 + 1.2 * k : 2.0 + 1.4 * k);
         else if (c === 'mover') pMover(rr(6, 8 + 2 * k));
         else if (c === 'spinner') pSpinner(1.0 + 0.7 * k);
       } else {
-        const room = y1 - cur.y - 1;
+        const room = y1 - cur.y - 4.6;              // plats kvar under taket (huvudet får inte slå i)
         let c; do { c = climbs[ri(0, climbs.length - 1)]; } while (c === lastClimb && climbs.length > 1);
+        if (turn === 2 && s > 0) c = ['bubbles', 'lift', 'stairs'][ri(0, s < 3 ? 0 : 2)];   // första klättringen efter portalen: hög
+        if (turn === 2 && s > 0 && c === 'stairs') { pStairs(15, 0.42); lastClimb = c; if (cur.y - lastCp >= 9 && cur.y < y1 - 9.5) { pCheckpoint(); lastCp = cur.y; } continue; }
         lastClimb = c;
-        if (c === 'pad') pPad(Math.min(room, rr(8, 11)));
+        if (c === 'bubbles') pBubbles(Math.min(room, rr(8, 12)));
         else if (c === 'lift') pLift(Math.min(room, rr(8, 12)));
         else if (c === 'stairs') { const n = Math.max(4, Math.min(ri(10, 15), Math.floor(room / 0.42))); pStairs(n, 0.42); }
         else if (c === 'zigzag') { const rise = 0.6 + 0.2 * k, n = Math.max(2, Math.min(ri(4, 6), Math.floor(room / rise))); pJumps(n, rr(1.0, 1.4), rise, 1.6, 1.2); }
         else { const rise = 0.7 + 0.2 * k, n = Math.max(2, Math.min(ri(4, 6), Math.floor(room / rise))); pJumps(n, rr(1.1, 1.4 + 0.3 * k), rise, 2.6 - 0.5 * k); }
       }
-      if (cur.y - lastCp >= 9 && cur.y < y1 - 6) { pCheckpoint(); lastCp = cur.y; }
+      if (cur.y - lastCp >= 9 && cur.y < y1 - 9.5) { pCheckpoint(); lastCp = cur.y; }
     }
-    // sista biten: trappa exakt upp till portalvåningen
-    const rem = y1 - cur.y;
-    if (rem > 0.01) { const n = Math.max(1, Math.ceil(rem / 0.43)); pStairs(n, rem / n); }
-    if (s < NPORT) pPortal(s); else pTop();
+    // sista biten: en trappa upp genom hålet i taket
+    const rem = y1 - cur.y, n = Math.max(2, Math.ceil(rem / 0.43));
+    const S = pStairs(n, rem / n, 3, false);
+    const i0 = Math.max(1, Math.ceil((y1 - 3.4 - S.y) / S.rise));        // första trappsteget där huvudet når taket
+    const nextTheme = THEMES[(s + 1) % THEMES.length];
+    floors.push(slab(y1, { ox: S.x, oz: S.z, yaw: S.d.yaw, x0: -1.9, x1: 1.9, z0: S.run * (i0 - 1) - 0.5, z1: S.run * n + 0.15 }, s < 19 ? nextTheme : ['#ffd84a', '#fff0b3']));
+    const arrive = Math.atan2(cur.z, cur.x);
+    if (s < NPORT) { G = new THREE.Group(); scene.add(G); sections.push(G); T = nextTheme; pPortal(s, y1, arrive + 3.4 / PATH_R); }
   }
-  // Slå ihop allt statiskt per sektion (få ritanrop)
+  // Slå ihop allt statiskt per våning (få ritanrop)
   for (const g of sections) mergeStatic(g);
 }
 
 /* ---------- Tornet, marken och himlen ---------- */
 function buildWorld() {
-  const brick = canvasTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#e9e3ff'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#d6ccff';
-    for (let y = 0; y < h; y += 32) for (let x = (y / 32) % 2 ? -32 : 0; x < w; x += 64) { g.fillRect(x + 3, y + 3, 58, 26); }
-    g.fillStyle = '#5c4bb8'; roundRectP(g, 96, 72, 64, 104, 30); g.fill();
-    g.fillStyle = '#ffd84a'; roundRectP(g, 104, 82, 48, 86, 22); g.fill();
-    g.fillStyle = '#5c4bb8'; g.fillRect(126, 82, 4, 86); g.fillRect(104, 120, 48, 4);
+  // tornväggar med runda fönster (man ser himlen och molnen genom dem)
+  const wallTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(255,170,220,.35)';
+    for (let y = 16; y < h; y += 48) for (let x = (y / 48) % 2 ? 40 : 16; x < w; x += 48) { g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); }
+    g.fillStyle = 'rgba(255,255,255,1)'; g.beginPath(); g.arc(128, 120, 64, 0, 7); g.fill();
+    g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(128, 120, 54, 0, 7); g.fill();
+    g.globalCompositeOperation = 'source-over';
+    g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.beginPath(); g.moveTo(128, 66); g.lineTo(128, 174); g.moveTo(74, 120); g.lineTo(182, 120); g.stroke();
   });
-  brick.wrapS = brick.wrapT = THREE.RepeatWrapping; brick.repeat.set(10, 120);
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(PILLAR_R, PILLAR_R + 1.5, TOP, 48, 1, true), new THREE.MeshLambertMaterial({ map: brick }));
-  pillar.position.y = TOP / 2; scene.add(pillar);
-  // ringar var 50:e meter
-  for (let i = 1; i <= TOP / SECTION; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(PILLAR_R + 0.15 + 1.5 * (1 - i * SECTION / TOP), 0.3, 8, 64), new THREE.MeshBasicMaterial({ color: THEMES[(i - 1) % THEMES.length][0] }));
-    ring.rotation.x = Math.PI / 2; ring.position.y = i * SECTION; scene.add(ring);
+  wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(9, 3.5);
+  for (let i = 0; i < TOP / SECTION; i++) {
+    const th = THEMES[i % THEMES.length];
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(WALL_R + 0.1, WALL_R + 0.1, SECTION, 48, 1, true), new THREE.MeshLambertMaterial({ map: wallTex, color: th[1], side: THREE.DoubleSide, alphaTest: 0.5 }));
+    w.position.y = i * SECTION + SECTION / 2; scene.add(w);
   }
-  // taket och pokalen
-  const roof = new THREE.Mesh(new THREE.CylinderGeometry(PILLAR_R, PILLAR_R, 0.6, 48), lam('#ffd84a')); roof.position.y = TOP - 0.3; scene.add(roof);
+  // tinnar runt taket
+  const tinM = lam('#ffffff');
+  for (let i = 0; i < 28; i++) {
+    const a = i / 28 * Math.PI * 2;
+    const m = new THREE.Mesh(roundBox(2.2, 1.4, 0.9), i % 2 ? tinM : lam('#ff8fd0')); m.position.set(Math.cos(a) * (WALL_R + 0.2), TOP, Math.sin(a) * (WALL_R + 0.2)); m.rotation.y = -a + Math.PI / 2; scene.add(m);
+  }
+  // pokalen på taket
   const cupM = new THREE.MeshStandardMaterial({ color: '#ffcf3a', metalness: 0.8, roughness: 0.25, emissive: '#ff9f00', emissiveIntensity: 0.25 });
   const cup = new THREE.Group(); cup.position.set(0, TOP, 0); scene.add(cup);
   const c1 = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 0.8, 24), cupM); c1.position.y = 0.4; cup.add(c1);
@@ -533,26 +614,23 @@ function buildWorld() {
   for (const s of [-1, 1]) { const h = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.14, 8, 20, Math.PI), cupM); h.position.set(s * 1.75, 3.5, 0); h.rotation.z = s > 0 ? -Math.PI / 2 : Math.PI / 2; cup.add(h); }
   addBox({ x: 0, y: TOP + 2, z: 0, hx: 1.6, hy: 2, hz: 1.6, yaw: 0 });
   topCup = cup;
-  // mark och startplats
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(230, 64), lam('#7ed957')); ground.rotation.x = -Math.PI / 2; scene.add(ground);
-  const plaza = new THREE.Mesh(new THREE.CircleGeometry(32, 48), lam('#ffe9a8')); plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.02; scene.add(plaza);
-  // träd runt om
-  const trunkG = new THREE.CylinderGeometry(0.35, 0.45, 2.4, 8), crownG = new THREE.ConeGeometry(2, 4.4, 9);
-  const tr = new THREE.Group();
+  // marken utanför tornet
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(260, 64), lam('#9be37a')); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.05; scene.add(ground);
   const rnd = seeded(7);
+  const trunkG = new THREE.CylinderGeometry(0.35, 0.45, 2.4, 8), crownG = new THREE.SphereGeometry(2, 10, 8);
+  const tr = new THREE.Group();
   for (let i = 0; i < 70; i++) {
-    const a = rnd() * Math.PI * 2, d = 45 + rnd() * 150;
-    const x = Math.cos(a) * d, z = Math.sin(a) * d, s = 0.8 + rnd() * 0.9;
-    const t = new THREE.Mesh(trunkG, lam('#8a5a32')); t.position.set(x, 1.2 * s, z); t.scale.setScalar(s); tr.add(t);
-    const c = new THREE.Mesh(crownG, lam(['#3f9a3c', '#57b84a', '#2f8a5a'][i % 3])); c.position.set(x, (2.4 + 2) * s, z); c.scale.setScalar(s); tr.add(c);
+    const a = rnd() * Math.PI * 2, d = 30 + rnd() * 170, x = Math.cos(a) * d, z = Math.sin(a) * d, s = 0.8 + rnd() * 0.9;
+    const t = new THREE.Mesh(trunkG, lam('#b07a52')); t.position.set(x, 1.2 * s, z); t.scale.setScalar(s); tr.add(t);
+    const c = new THREE.Mesh(crownG, lam(['#ff9ad5', '#9be37a', '#c9a8ff', '#7fd8ff'][i % 4])); c.position.set(x, 3.8 * s, z); c.scale.setScalar(s); tr.add(c);
   }
   scene.add(tr); mergeStatic(tr);
-  // moln
+  // moln runt tornet (syns genom fönstren)
   const cloudTex = canvasTex(128, 64, (g) => { g.fillStyle = '#fff'; for (const [x, y, r] of [[34, 38, 22], [60, 30, 28], [90, 38, 22], [64, 44, 20]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } });
-  const cm = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.92, depthWrite: false });
-  for (let i = 0; i < 90; i++) {
-    const a = rnd() * Math.PI * 2, d = 40 + rnd() * 170, s = new THREE.Sprite(cm);
-    s.position.set(Math.cos(a) * d, 60 + rnd() * 620, Math.sin(a) * d); s.scale.set(28 + rnd() * 30, 12 + rnd() * 10, 1); scene.add(s);
+  const cm = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.95, depthWrite: false });
+  for (let i = 0; i < 110; i++) {
+    const a = rnd() * Math.PI * 2, d = 30 + rnd() * 150, s = new THREE.Sprite(cm);
+    s.position.set(Math.cos(a) * d, rnd() * 1050, Math.sin(a) * d); s.scale.set(24 + rnd() * 30, 10 + rnd() * 10, 1); scene.add(s);
   }
   // stjärnor (syns högt upp)
   const sp = [];
@@ -560,14 +638,24 @@ function buildWorld() {
   const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
   stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: '#ffffff', size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
   scene.add(stars);
-  // planet längst upp
-  planet = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 16), new THREE.MeshBasicMaterial({ color: '#ff8de0', fog: false, transparent: true, opacity: 0 }));
+  planet = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 16), new THREE.MeshBasicMaterial({ color: '#ff9ad5', fog: false, transparent: true, opacity: 0 }));
   scene.add(planet);
+  // bubblor som svävar uppåt inne i tornet (pynt)
+  for (const [n, size, col] of [[46, 0.8, '#ffffff'], [18, 1.9, '#ffe6f6']]) {
+    const pos = new Float32Array(n * 3), meta = [];
+    for (let i = 0; i < n; i++) meta.push({ a: rnd() * Math.PI * 2, r: 2 + rnd() * 13, y: rnd() * 40, v: 0.5 + rnd() * 0.9, w: rnd() * 6 });
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ map: bubbleTex, color: col, size, transparent: true, depthWrite: false, alphaTest: 0.02 }));
+    pts.frustumCulled = false; scene.add(pts);
+    floaters.push({ pts, meta, pos });
+  }
 }
 let stars = null, planet = null, topCup = null;
+const floaters = [];
+
 
 /* ---------- Gubben ---------- */
-const P = { x: 0, y: 0, z: 0, vx: 0, vz: 0, vy: 0, grounded: true, on: null, heading: 0, speed: 0, coyote: 0, launch: 0, airT: 0 };
+const P = { x: 0, y: 0, z: 0, vx: 0, vz: 0, vy: 0, grounded: true, on: null, heading: 0, speed: 0, coyote: 0, launch: 0, airT: 0, airJumps: 1 };
 let ch = null, look = underwear(), buildId = 0;
 async function applyLook(next, puff = false) {
   const id = ++buildId;
@@ -599,7 +687,7 @@ const run = { cp: 0, look: null, paid: -1, best: 0, done: false };
 let cpIdx = 0;
 function saveRun() {
   if (!player) return;
-  Save.updatePlayer(player.id, p => { p.progress.torn = { cp: cpIdx, look, paid: run.paid, best: Math.max(run.best, (p.progress.torn || {}).best || 0), done: run.done, at: Date.now() }; });
+  Save.updatePlayer(player.id, p => { p.progress.torn = { v: 2, cp: cpIdx, look, paid: run.paid, best: Math.max(run.best, (p.progress.torn || {}).best || 0), done: run.done, at: Date.now() }; });
 }
 function giveCoins(n) {
   if (!player) return;
@@ -760,13 +848,30 @@ $('jumpBtn').addEventListener('click', jump);
 let jumpBuf = 0;
 function jump() {
   if (!started || finished) return;
-  if (P.grounded || P.coyote > 0) doJump(); else jumpBuf = 0.15;          // lite förlåtande: hoppet "sparas" en kort stund
+  if (P.grounded || P.coyote > 0) doJump();
+  else if (P.airJumps > 0) airJump();                                     // dubbelhopp med bubbla
+  else jumpBuf = 0.15;                                                    // lite förlåtande: hoppet "sparas" en kort stund
 }
 function doJump() {
-  P.vy = JUMP; P.grounded = false; P.coyote = 0; P.on = null; jumpBuf = 0;
+  P.vy = JUMP; P.grounded = false; P.coyote = 0; P.on = null; jumpBuf = 0; P.airJumps = 1;
   if (ch) ch.play('jump', 0.08);
   sJump();
 }
+function airJump() {
+  P.airJumps = 0; P.vy = AIR_JUMP; P.launch = 0; jumpBuf = 0;
+  if (ch) ch.play('jump', 0.05);
+  gumBubble(); sGum();
+}
+/* Bubbelgumsbubblan under fötterna vid dubbelhopp: blåses upp och smäller */
+const gums = [];
+const gumTex = canvasTex(128, 128, (g) => {
+  const r = g.createRadialGradient(50, 48, 6, 64, 64, 62);
+  r.addColorStop(0, 'rgba(255,215,240,0.95)'); r.addColorStop(0.55, 'rgba(255,128,200,0.85)'); r.addColorStop(0.95, 'rgba(240,70,170,0.95)'); r.addColorStop(1, 'rgba(240,70,170,0)');
+  g.fillStyle = r; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.95)'; g.beginPath(); g.ellipse(42, 38, 14, 8, -0.7, 0, 7); g.fill();
+});
+const gumMat = new THREE.SpriteMaterial({ map: gumTex, transparent: true, depthWrite: false });
+function gumBubble() { const s = new THREE.Sprite(gumMat); s.position.set(P.x, P.y + 0.05, P.z); s.scale.setScalar(0.3); scene.add(s); gums.push({ s, t: 0 }); }
 
 /* ---------- Spelloop ---------- */
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
@@ -777,6 +882,11 @@ function update(dt) {
   for (const o of dyn) if (o.update) o.update(time);
   for (const s of spinners) { s.a += s.w * dt; s.pivot.rotation.y = s.a; }
   for (const b of belts) b.tex.offset.y -= b.speed * dt / 1.4;
+  for (const u of bubbles) {
+    if (u.popT > 0) { u.popT -= dt; if (u.popT <= 0) { u.b.ghost = false; u.spr.visible = true; u.grow = 0; } continue; }
+    if (u.grow !== undefined && u.grow < 1) u.grow = Math.min(1, u.grow + dt * 3);
+    u.spr.scale.setScalar(2.2 * (u.grow === undefined ? 1 : 0.3 + 0.7 * u.grow) + Math.sin(time * 2.4 + u.ph) * 0.07);
+  }
   if (!started || finished) { animate(dt, false); return; }
 
   // Åk med det man står på (hiss, flyttande plattform, rullband)
@@ -827,7 +937,7 @@ function update(dt) {
   if (P.grounded) {
     const s = supportAt(P.x, P.z, P.y - 0.3, P.y + STEP);
     if (s) { P.y = s.top; P.on = s; P.airT = 0; }
-    else { P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; if (ch) ch.play('jump', 0.2); }
+    else { P.grounded = false; P.on = null; P.vy = 0; P.coyote = 0.12; P.airJumps = 1; if (ch) ch.play('jump', 0.2); }
   }
   if (!P.grounded) {
     P.coyote = Math.max(0, P.coyote - dt);
@@ -865,17 +975,18 @@ function update(dt) {
   // Checkpoints, portaler och toppen
   if (P.grounded && P.on) {
     if (P.on.cp !== undefined) setCp(P.on.cp);
-    if (P.on.portal) {
-      const Pt = P.on.portal; preparePortal(Pt);
-      if (Pt.chosen < 0) { setCp(Pt.cpIn, false); if (!Pt.told) { Pt.told = true; const [t, ic] = CAT[Pt.cat]; toast(`${ic} ${t} Gå igenom en portal`, 3200); } }
-    }
   }
   for (const Pt of portals) {
-    if (Math.abs(P.y - Pt.y) > 4 || Math.abs(P.x - Pt.x) > 9 || Math.abs(P.z - Pt.z) > 9) continue;
+    if (Math.abs(P.y - Pt.y) > 4 || Math.abs(P.x - Pt.x) > 10 || Math.abs(P.z - Pt.z) > 10) continue;
     preparePortal(Pt);
-    const lz = (P.x - Pt.x) * Pt.d.x + (P.z - Pt.z) * Pt.d.z, lx = (P.x - Pt.x) * Pt.d.lx + (P.z - Pt.z) * Pt.d.lz;
+    // väggen går genom tornets mitt: lz < 0 = sidan man kommer upp på, lz > 0 = efter portalen
+    const lz = P.x * Pt.t.x + P.z * Pt.t.z, lx = P.x * Pt.u.x + P.z * Pt.u.z;
+    if (P.grounded && Pt.chosen < 0 && lz < 0 && Math.abs(P.y - Pt.y) < 0.3) {
+      setCp(Pt.cpIn, false);
+      if (!Pt.told) { Pt.told = true; const [t, ic] = CAT[Pt.cat]; toast(`${ic} ${t} Gå igenom en portal`, 3200); }
+    }
     const prev = lastPortalLz.get(Pt);
-    if (prev !== undefined && prev < 1.0 && lz >= 1.0) { const gi = Pt.gates.findIndex(g => Math.abs(lx - g.lx) < 1.25); if (gi >= 0) choose(Pt, gi); }
+    if (prev !== undefined && prev < 0 && lz >= 0) { const gi = Pt.gates.findIndex(g => Math.abs(lx - g.lx) < 1.25); if (gi >= 0) choose(Pt, gi); }
     lastPortalLz.set(Pt, lz);
   }
   if (P.grounded && P.y >= TOP - 0.01 && !finished) win();
@@ -886,13 +997,14 @@ function update(dt) {
 }
 function land(s) {
   P.grounded = true; P.on = s; P.vy = 0; P.coyote = 0;
-  if (s.pad) {                                              // studsmatta: skjuts upp till plattformen ovanför
-    const t = s.pad, apex = Math.max(1, t.y - s.top) + 1.8;
-    const vy = Math.sqrt(2 * -GRAVITY * apex), tt = vy / -GRAVITY + Math.sqrt(2 * 1.8 / -GRAVITY);
-    P.vy = vy; P.vx = (t.x - P.x) / tt; P.vz = (t.z - P.z) / tt; P.launch = tt; P.grounded = false; P.on = null;
+  if (s.bounce) {                                           // studsbubbla: smäller och skjuter upp en till nästa
+    const t = s.bounce, apex = Math.max(1, t.y - s.top) + 1.6;
+    const vy = Math.sqrt(2 * -GRAVITY * apex), tt = vy / -GRAVITY + Math.sqrt(2 * 1.6 / -GRAVITY);
+    P.vy = vy; P.vx = (t.x - P.x) / tt; P.vz = (t.z - P.z) / tt; P.launch = tt; P.grounded = false; P.on = null; P.airJumps = 1;
     P.heading = Math.atan2(t.x - P.x, t.z - P.z);
     if (ch) ch.play('jump', 0.05);
-    sBoing(); return;
+    const u = s.bubble; if (u) { u.popT = 2.6; s.ghost = true; u.spr.visible = false; sparkle(u.x, u.y + 0.3, u.z, 12, '#ffc4ec'); }
+    sPop(); sBoing(); return;
   }
   if (ch) ch.play(Math.hypot(P.vx, P.vz) > 0.5 ? 'run' : 'idle', 0.12);
   if (jumpBuf > 0) doJump();
@@ -919,13 +1031,30 @@ function animate(dt, moving, walking) {
     if (p.life <= 0) { scene.remove(p.s); if (p.own) p.s.material.dispose(); sparks.splice(i, 1); }
   }
   if (topCup) topCup.rotation.y += dt * 0.5;
+  for (let i = gums.length - 1; i >= 0; i--) {
+    const g = gums[i]; g.t += dt;
+    g.s.scale.setScalar(0.3 + Math.min(1, g.t / 0.16) * 1.2);
+    if (g.t < 0.16) g.s.position.set(P.x, P.y - 0.25, P.z);
+    if (g.t > 0.3) { scene.remove(g.s); sparkle(g.s.position.x, g.s.position.y + 0.2, g.s.position.z, 9, '#ff8fd0'); gums.splice(i, 1); }
+  }
+  // pyntbubblor som stiger i våningen man är på
+  const fb = Math.floor(Math.max(0, Math.min(TOP - 1, P.y)) / SECTION) * SECTION;
+  for (const f of floaters) {
+    for (let i = 0; i < f.meta.length; i++) {
+      const m = f.meta[i], y = (m.y + time * m.v) % (SECTION - 2);
+      f.pos[i * 3] = Math.cos(m.a) * m.r + Math.sin(time * 0.7 + m.w) * 0.4;
+      f.pos[i * 3 + 1] = fb + 0.5 + y;
+      f.pos[i * 3 + 2] = Math.sin(m.a) * m.r + Math.cos(time * 0.6 + m.w) * 0.4;
+    }
+    f.pts.geometry.attributes.position.needsUpdate = true;
+  }
   // Kamera bakom gubben, inte inne i tornet eller i plattformar
   camTarget.set(P.x, P.y + 1.5, P.z);
   const sx = Math.sin(yaw) * Math.cos(pitch), sz = Math.cos(yaw) * Math.cos(pitch), sy = Math.sin(pitch);
   let d = dist;
   for (let st = 0.8; st <= dist; st += 0.4) {
     const x = camTarget.x + sx * st, y = camTarget.y + sy * st, z = camTarget.z + sz * st;
-    let hit = Math.hypot(x, z) < pillarR(y) + 0.6 && y < TOP;
+    let hit = Math.hypot(x, z) > WALL_R - 0.7 && y < TOP + 1;
     if (!hit) for (const b of near(x, z, y - 0.5, y + 0.5)) { if (!b.ghost && y > b.bot - 0.25 && y < b.top + 0.25 && inside(b, x, z, 0.25)) { hit = true; break; } }
     if (hit) { d = Math.max(1.2, st - 0.4); break; }
   }
@@ -941,7 +1070,7 @@ function animate(dt, moving, walking) {
   if (stars) { stars.material.opacity = Math.max(0, Math.min(1, (h - 0.45) / 0.35)); stars.position.set(camera.position.x, camera.position.y - 200, camera.position.z); }
   if (planet) { planet.material.opacity = Math.max(0, Math.min(1, (h - 0.6) / 0.3)); planet.position.set(camera.position.x + 420, camera.position.y + 180, camera.position.z - 520); }
   sun.position.set(P.x + 40, P.y + 80, P.z + 30); sun.target.position.set(P.x, P.y, P.z);
-  hemi.intensity = 1.6 - h * 0.5;
+  hemi.intensity = 1.7 - h * 0.5;
   // Visa bara rörliga saker i närheten
   if ((frame++ & 15) === 0) {
     for (const o of dyn) {
@@ -952,14 +1081,15 @@ function animate(dt, moving, walking) {
     for (const b of belts) b.mesh.visible = Math.abs(b.y - P.y) < 70;
   }
   // höjdmätaren
-  $('hNow').innerHTML = `${Math.max(0, Math.floor(P.y))} <small>m</small>`;
+  const fl = Math.min(20, Math.floor(Math.max(0, P.y) / SECTION) + 1);
+  $('hNow').innerHTML = `${Math.max(0, Math.floor(P.y))} <small>m</small><br><small>${P.y >= TOP - 0.5 ? 'Taket 👑' : 'Våning ' + fl}</small>`;
   const H = $('bar').clientHeight - 6;
   $('bar').querySelector('.fill').style.height = Math.max(0, Math.min(1, run.best / TOP)) * H + 'px';
   $('bar').querySelector('.me').style.bottom = Math.max(0, Math.min(1, P.y / TOP)) * H + 'px';
   for (const t of ticks) t.el.classList.toggle('done', portals[t.k] && portals[t.k].chosen >= 0);
 }
 let frame = 0;
-const SKY = ['#8fd3ff', '#7fb8ff', '#8a8cff', '#5b3fbf', '#2a1a6e', '#0d0b2e'].map(c => new THREE.Color(c));
+const SKY = ['#bfe6ff', '#ffd1ec', '#e2c9ff', '#a98bff', '#5b3fbf', '#22175e'].map(c => new THREE.Color(c));
 const skyCol = new THREE.Color();
 const ticks = [];
 for (let k = 0; k < NPORT; k++) { const el = document.createElement('div'); el.className = 'tick'; el.style.bottom = ((k + 1) * SECTION / TOP * 100) + '%'; $('bar').appendChild(el); ticks.push({ el, k }); }
@@ -998,16 +1128,23 @@ function loop() {
 }
 
 /* ---------- Start ---------- */
+// Sparning från första versionen av banan (spiral runt tornet): checkpoint-numren stämmer inte längre,
+// så man fortsätter efter den senaste portalen man gått igenom, med samma kläder.
+function savedCp(sv) {
+  if (!sv) return 0;
+  if (sv.v === 2) return sv.cp;
+  return sv.paid >= 0 && portals[sv.paid] ? portals[sv.paid].cpOut : 0;
+}
 function startRun(fromSave) {
   const saved = player && player.progress && player.progress.torn;
   cpIdx = 0; run.paid = -1; run.done = false; finished = false;
   for (const c of checkpoints) if (c.flag && !c.start) c.flag.cloth.material.color.set('#9a9ab0');
   for (const Pt of portals) { Pt.chosen = -1; Pt.opts = null; Pt.gates.forEach(g => { g.film.material.opacity = 0.45; g.film.material.color.set('#ffffff'); g.frameM.color.set('#ffffff'); g.sign.material.map = unknownTex; g.sign.material.needsUpdate = true; }); Pt.head.material.map = unknownHead; Pt.head.material.needsUpdate = true; }
   lastPortalLz = new Map();
-  if (fromSave && saved && saved.cp > 0 && checkpoints[saved.cp]) {
+  if (fromSave && saved && savedCp(saved) > 0 && checkpoints[savedCp(saved)]) {
     look = { ...underwear(), ...saved.look };
     run.paid = saved.paid ?? -1;
-    cpIdx = saved.cp;
+    cpIdx = savedCp(saved);
     // tidigare portaler räknas som valda
     for (const Pt of portals) if (Pt.cpOut <= cpIdx) Pt.chosen = 0;
     for (let i = 0; i <= cpIdx; i++) if (checkpoints[i].flag) checkpoints[i].flag.cloth.material.color.set('#5ad04a');
@@ -1030,8 +1167,8 @@ camera.position.set(P.x + 6, P.y + 4, P.z + 6);
 loop();
 $('loading').classList.add('hide');
 const saved = player && player.progress && player.progress.torn;
-if (saved && saved.cp > 0 && !saved.done && checkpoints[saved.cp]) {
-  $('startText').textContent = `Du var på ${Math.round(checkpoints[saved.cp].y)} meter. Vill du fortsätta där, eller börja om längst ner i underkläderna?`;
+if (saved && savedCp(saved) > 0 && !saved.done && checkpoints[savedCp(saved)]) {
+  $('startText').textContent = `Du var på ${Math.round(checkpoints[savedCp(saved)].y)} meter. Vill du fortsätta där, eller börja om längst ner i underkläderna?`;
   $('startBox').classList.add('show');
   $('bContinue').onclick = () => { $('startBox').classList.remove('show'); startRun(true); };
   $('bRestart').onclick = () => { $('startBox').classList.remove('show'); startRun(false); };
@@ -1041,7 +1178,7 @@ $('bMenu').onclick = () => { location.href = 'index.html'; };
 
 // För test
 window.Torn = {
-  P, checkpoints, portals, boxes, keys, route, dyn, get look() { return look; }, get cp() { return cpIdx; }, get ch() { return ch; }, renderer, scene, camera,
+  P, checkpoints, portals, boxes, keys, route, dyn, bubbles, get look() { return look; }, get cp() { return cpIdx; }, get ch() { return ch; }, renderer, scene, camera,
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) update(dt); },
   get yaw() { return yaw; }, set yaw(v) { yaw = v; }, set pitch(v) { pitch = v; }, set dist(v) { dist = v; },
   setCp(i) { cpIdx = i; respawn(); }, jump, choose, preparePortal, supportAt, get finished() { return finished; }
